@@ -1,18 +1,14 @@
 import {
   AvatarBehaviors,
-  type AvatarBehavior,
   type ParticipantSnapshot,
   type ServerMessage,
 } from '../shared/protocol.js';
-
-const ACTION_DURATIONS_MS: Record<AvatarBehavior, number> = {
-  idle: 0,
-  run: 2400,
-  wave: 1800,
-  dance: 3000,
-  jump: 1100,
-  leaving: 0,
-};
+import {
+  commandForMonster,
+  monsterForSlot,
+  supportedCommands,
+  type MonsterCommandSpec,
+} from '../shared/monsters.js';
 
 export interface ChatMessage {
   userId: string;
@@ -70,8 +66,12 @@ export class ParticipantManager {
     if (command === '!leave') {
       return this.leave(message.userId);
     }
-    const behavior = this.behaviorForCommand(command);
-    return behavior == null ? false : this.act(message.userId, behavior);
+    const participant = this.participants.get(message.userId);
+    const action =
+      participant == null
+        ? null
+        : commandForMonster(participant.monsterType, command);
+    return action == null ? false : this.act(message.userId, action);
   }
 
   setAcceptingJoins(acceptingJoins: boolean): void {
@@ -101,11 +101,16 @@ export class ParticipantManager {
     if (slot < 0) {
       return false;
     }
+    const monster = monsterForSlot(slot);
     const participant: ManagedParticipant = {
       userId,
       displayName: sanitizeDisplayName(displayName),
       colorHex: colorForUser(userId),
       slot,
+      monsterType: monster.type,
+      monsterCategory: monster.category,
+      monsterName: monster.name,
+      supportedCommands: supportedCommands(monster.type),
       behavior: AvatarBehaviors.Idle,
       actionSequence: 0,
       targetX: 0,
@@ -118,7 +123,7 @@ export class ParticipantManager {
     return true;
   }
 
-  private act(userId: string, behavior: AvatarBehavior): boolean {
+  private act(userId: string, action: MonsterCommandSpec): boolean {
     const participant = this.participants.get(userId);
     if (participant == null || participant.behavior === AvatarBehaviors.Leaving) {
       return false;
@@ -131,9 +136,9 @@ export class ParticipantManager {
     if (participant.actionTimer != null) {
       clearTimeout(participant.actionTimer);
     }
-    participant.behavior = behavior;
+    participant.behavior = action.behavior;
     participant.actionSequence += 1;
-    if (behavior === AvatarBehaviors.Run) {
+    if (action.moves) {
       const target = runTarget(userId, participant.actionSequence);
       participant.targetX = target.x;
       participant.targetZ = target.z;
@@ -141,12 +146,11 @@ export class ParticipantManager {
     this.options.emit({
       type: 'avatar.action',
       userId,
-      behavior,
+      behavior: action.behavior,
       actionSequence: participant.actionSequence,
       targetX: participant.targetX,
       targetZ: participant.targetZ,
     });
-    const duration = ACTION_DURATIONS_MS[behavior];
     participant.actionTimer = setTimeout(() => {
       if (participant.behavior !== AvatarBehaviors.Leaving) {
         participant.behavior = AvatarBehaviors.Idle;
@@ -161,7 +165,7 @@ export class ParticipantManager {
         });
       }
       participant.actionTimer = null;
-    }, duration);
+    }, action.durationMs);
     participant.actionTimer.unref();
     return true;
   }
@@ -189,21 +193,6 @@ export class ParticipantManager {
     }, this.leaveDeadlineMs);
     participant.leaveTimer.unref();
     return true;
-  }
-
-  private behaviorForCommand(command: string | undefined): AvatarBehavior | null {
-    switch (command) {
-      case '!run':
-        return AvatarBehaviors.Run;
-      case '!wave':
-        return AvatarBehaviors.Wave;
-      case '!dance':
-        return AvatarBehaviors.Dance;
-      case '!jump':
-        return AvatarBehaviors.Jump;
-      default:
-        return null;
-    }
   }
 
   private nextOpenSlot(): number {

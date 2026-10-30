@@ -1,9 +1,19 @@
+import type { MonsterCategory, MonsterType } from './monsters.js';
+
 export const AvatarBehaviors = {
   Idle: 'idle',
+  Walk: 'walk',
   Run: 'run',
   Wave: 'wave',
   Dance: 'dance',
   Jump: 'jump',
+  Duck: 'duck',
+  Punch: 'punch',
+  Yes: 'yes',
+  No: 'no',
+  Bite: 'bite',
+  Fly: 'fly',
+  Headbutt: 'headbutt',
   Leaving: 'leaving',
 } as const;
 
@@ -15,6 +25,10 @@ export interface ParticipantSnapshot {
   displayName: string;
   colorHex: string;
   slot: number;
+  monsterType: MonsterType;
+  monsterCategory: MonsterCategory;
+  monsterName: string;
+  supportedCommands: string[];
   behavior: AvatarBehavior;
   actionSequence: number;
   targetX: number;
