@@ -87,3 +87,33 @@ test('category-specific commands reject unsupported actions safely', () => {
   assert.equal(manager.snapshot().find(({ userId }) => userId === 'flyer')?.behavior, 'fly');
   manager.clear();
 });
+
+test('normal chat is filtered, rate-limited, and emitted only for joined viewers', async () => {
+  const emitted: ServerMessage[] = [];
+  const manager = new ParticipantManager({
+    emit: (message) => emitted.push(message),
+    chatCooldownMs: 15,
+  });
+
+  assert.equal(manager.handleChat({ userId: '1', displayName: 'Alpha', text: 'hello' }), false);
+  manager.handleChat({ userId: '1', displayName: 'Alpha', text: '!join' });
+  assert.equal(manager.handleChat({ userId: '1', displayName: 'Alpha', text: '!unknown' }), false);
+  assert.equal(
+    manager.handleChat({ userId: '1', displayName: 'Alpha', text: `  hi\u0000 ${'💕'.repeat(60)}  ` }),
+    true,
+  );
+  assert.equal(manager.handleChat({ userId: '1', displayName: 'Alpha', text: 'too soon' }), false);
+
+  const firstChat = emitted.find((message) => message.type === 'avatar.chat');
+  assert.equal(firstChat?.type, 'avatar.chat');
+  assert.equal(firstChat?.type === 'avatar.chat' && firstChat.userId, '1');
+  assert.ok(firstChat?.type === 'avatar.chat' && [...firstChat.text].length <= 100);
+  assert.ok(firstChat?.type === 'avatar.chat' && !firstChat.text.includes('\u0000'));
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(manager.handleChat({ userId: '1', displayName: 'Alpha', text: 'new message' }), true);
+  assert.equal(emitted.filter((message) => message.type === 'avatar.chat').length, 2);
+  manager.handleChat({ userId: '1', displayName: 'Alpha', text: '!leave' });
+  assert.equal(manager.handleChat({ userId: '1', displayName: 'Alpha', text: 'after leave' }), false);
+  manager.clear();
+});

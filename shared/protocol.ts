@@ -42,6 +42,7 @@ export type ServerMessage =
       acceptingJoins: boolean;
     }
   | { type: 'avatar.join'; participant: ParticipantSnapshot }
+  | { type: 'avatar.chat'; userId: string; text: string }
   | {
       type: 'avatar.action';
       userId: string;

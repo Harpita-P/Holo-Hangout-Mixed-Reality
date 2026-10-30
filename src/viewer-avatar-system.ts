@@ -50,6 +50,10 @@ interface AvatarRuntime {
   rightArm: Object3D | null;
   label: Sprite | null;
   labelText: string;
+  bubble: Sprite | null;
+  bubbleText: string;
+  bubbleShownAt: number;
+  bubbleExpiresAt: number;
   monster: MonsterDefinition | null;
   monsterVisual: Object3D | null;
   mixer: AnimationMixer | null;
@@ -150,6 +154,7 @@ export class ViewerAvatarSystem extends createSystem({
     for (const [entity, runtime] of this.runtimes) {
       if (!entity.object3D?.visible) continue;
       runtime.mixer?.update(Math.min(delta, 1 / 15));
+      this.updateBubble(runtime, time);
       if (runtime.held || this.queries.held.entities.has(entity)) continue;
       this.animate(entity, runtime, delta, time);
     }
@@ -177,6 +182,10 @@ export class ViewerAvatarSystem extends createSystem({
       rightArm: object.getObjectByName('Right Arm') ?? null,
       label: null,
       labelText: '',
+      bubble: null,
+      bubbleText: '',
+      bubbleShownAt: 0,
+      bubbleExpiresAt: 0,
       monster: null,
       monsterVisual: null,
       mixer: null,
@@ -208,6 +217,9 @@ export class ViewerAvatarSystem extends createSystem({
         break;
       case 'avatar.join':
         this.activate(message.participant, time);
+        break;
+      case 'avatar.chat':
+        this.showBubble(message.userId, message.text, time);
         break;
       case 'avatar.action':
         this.applyAction(message.userId, message.behavior, message.actionSequence, message.targetX, message.targetZ, time);
@@ -391,6 +403,7 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.commandBehavior = null;
     runtime.actionStartedAt = time;
     runtime.leavingAt = time + Math.max(0, Math.min(deadlineMs, 1000)) / 1000;
+    this.removeBubble(runtime);
     this.playClip(runtime, 'Death', false, time);
     if (this.queries.held.entities.has(entity)) this.grabSystem?.forceRelease(entity);
   }
@@ -412,6 +425,7 @@ export class ViewerAvatarSystem extends createSystem({
     entity.setValue(ViewerAvatar, 'behavior', AvatarBehaviors.Idle);
     entity.setValue(MonsterAvatar, 'state', MonsterStates.Autonomous);
     entity.setValue(MonsterAvatar, 'activeClip', '');
+    this.removeBubble(runtime);
     this.removeLabel(runtime);
     this.userEntities.delete(userId);
   }
@@ -684,9 +698,100 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.labelText = '';
   }
 
+  private showBubble(userId: string, text: string, time: number): void {
+    const entity = this.userEntities.get(userId);
+    const runtime = entity == null ? null : this.runtimes.get(entity);
+    if (
+      entity == null ||
+      runtime == null ||
+      entity.object3D == null ||
+      !entity.object3D.visible ||
+      entity.getValue(ViewerAvatar, 'behavior') === AvatarBehaviors.Leaving
+    ) {
+      return;
+    }
+    this.removeBubble(runtime);
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 320;
+    const context = canvas.getContext('2d');
+    if (context == null) return;
+
+    context.shadowColor = 'rgba(18, 31, 38, 0.2)';
+    context.shadowBlur = 12;
+    context.shadowOffsetY = 8;
+    context.fillStyle = '#FFF8E8';
+    context.strokeStyle = '#293340';
+    context.lineWidth = 8;
+    context.beginPath();
+    context.roundRect(20, 16, 600, 238, 48);
+    context.moveTo(284, 250);
+    context.lineTo(320, 302);
+    context.lineTo(356, 250);
+    context.closePath();
+    context.fill();
+    context.stroke();
+    context.shadowColor = 'transparent';
+
+    context.fillStyle = '#293340';
+    context.font = '600 36px system-ui, sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    const lines = wrapBubbleText(context, text, 530, 3);
+    const lineHeight = 52;
+    const startY = 134 - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, index) => context.fillText(line, 320, startY + index * lineHeight));
+
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.minFilter = LinearFilter;
+    const material = new SpriteMaterial({ map: texture, transparent: true, opacity: 0 });
+    material.depthTest = false;
+    const bubble = new Sprite(material);
+    bubble.name = 'Viewer Speech Bubble';
+    const hover = runtime.monster?.category === MonsterCategories.Flying ? 0.06 : 0;
+    bubble.position.set(0, (runtime.monster?.targetHeight ?? 0.18) + hover + 0.115, 0);
+    bubble.scale.set(0.001, 0.001, 1);
+    bubble.renderOrder = 21;
+    entity.object3D.add(bubble);
+    runtime.bubble = bubble;
+    runtime.bubbleText = text;
+    runtime.bubbleShownAt = time;
+    runtime.bubbleExpiresAt = time + 5;
+  }
+
+  private updateBubble(runtime: AvatarRuntime, time: number): void {
+    const bubble = runtime.bubble;
+    if (bubble == null) return;
+    if (time >= runtime.bubbleExpiresAt) {
+      this.removeBubble(runtime);
+      return;
+    }
+    const popProgress = clamp((time - runtime.bubbleShownAt) / 0.16, 0, 1);
+    const fadeProgress = clamp((runtime.bubbleExpiresAt - time) / 0.45, 0, 1);
+    const scale = 0.82 + 0.18 * elasticOut(popProgress);
+    bubble.scale.set(0.28 * scale, 0.14 * scale, 1);
+    bubble.material.opacity = Math.min(popProgress, fadeProgress);
+  }
+
+  private removeBubble(runtime: AvatarRuntime): void {
+    const bubble = runtime.bubble;
+    if (bubble == null) return;
+    bubble.removeFromParent();
+    bubble.material.map?.dispose();
+    bubble.material.dispose();
+    runtime.bubble = null;
+    runtime.bubbleText = '';
+    runtime.bubbleShownAt = 0;
+    runtime.bubbleExpiresAt = 0;
+  }
+
   private setSocketStatus(status: SocketStatus): void {
     this.backendConnected = status === 'connected';
-    if (!this.backendConnected) this.twitchConnected = false;
+    if (!this.backendConnected) {
+      this.twitchConnected = false;
+      for (const runtime of this.runtimes.values()) this.removeBubble(runtime);
+    }
     this.renderStatus();
   }
 
@@ -699,6 +804,36 @@ export class ViewerAvatarSystem extends createSystem({
         ? 'ChatIRL backend connected — authorize Twitch'
         : 'ChatIRL backend offline';
   }
+}
+
+function wrapBubbleText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines: number,
+): string[] {
+  const characters = [...text];
+  const lines: string[] = [];
+  let line = '';
+  for (let index = 0; index < characters.length; index += 1) {
+    const candidate = line + characters[index];
+    if (line === '' || context.measureText(candidate).width <= maxWidth) {
+      line = candidate;
+      continue;
+    }
+    if (lines.length === maxLines - 1) {
+      let finalLine = (line + characters.slice(index).join('')).trim();
+      while (finalLine && context.measureText(`${finalLine}…`).width > maxWidth) {
+        finalLine = [...finalLine].slice(0, -1).join('');
+      }
+      lines.push(`${finalLine.trimEnd()}…`);
+      return lines;
+    }
+    lines.push(line.trimEnd());
+    line = characters[index].trimStart();
+  }
+  if (line.trim()) lines.push(line.trim());
+  return lines;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

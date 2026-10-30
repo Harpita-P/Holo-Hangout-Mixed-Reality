@@ -26,6 +26,7 @@ interface ManagedParticipant extends ParticipantSnapshot {
 export interface ParticipantManagerOptions {
   maxParticipants?: number;
   actionCooldownMs?: number;
+  chatCooldownMs?: number;
   leaveDeadlineMs?: number;
   emit: (message: ServerMessage) => void;
 }
@@ -33,15 +34,18 @@ export interface ParticipantManagerOptions {
 export class ParticipantManager {
   private readonly participants = new Map<string, ManagedParticipant>();
   private readonly cooldowns = new Map<string, number>();
+  private readonly chatCooldowns = new Map<string, number>();
   private readonly lastMonsterByUser = new Map<string, MonsterType>();
   private readonly maxParticipants: number;
   private readonly actionCooldownMs: number;
+  private readonly chatCooldownMs: number;
   private readonly leaveDeadlineMs: number;
   private acceptingJoins = true;
 
   constructor(private readonly options: ParticipantManagerOptions) {
     this.maxParticipants = options.maxParticipants ?? 10;
     this.actionCooldownMs = options.actionCooldownMs ?? 750;
+    this.chatCooldownMs = options.chatCooldownMs ?? 2000;
     this.leaveDeadlineMs = options.leaveDeadlineMs ?? 1200;
   }
 
@@ -62,7 +66,9 @@ export class ParticipantManager {
   }
 
   handleChat(message: ChatMessage): boolean {
-    const command = message.text.trim().split(/\s+/u)[0]?.toLowerCase();
+    const text = message.text.trim();
+    if (!text) return false;
+    const command = text.split(/\s+/u)[0]?.toLowerCase();
     if (command === '!join') {
       return this.join(message.userId, message.displayName);
     }
@@ -70,11 +76,23 @@ export class ParticipantManager {
       return this.leave(message.userId);
     }
     const participant = this.participants.get(message.userId);
-    const action =
-      participant == null
-        ? null
-        : commandForMonster(participant.monsterType, command);
-    return action == null ? false : this.act(message.userId, action);
+    if (text.startsWith('!')) {
+      const action =
+        participant == null
+          ? null
+          : commandForMonster(participant.monsterType, command);
+      return action == null ? false : this.act(message.userId, action);
+    }
+    if (participant == null || participant.behavior === AvatarBehaviors.Leaving) {
+      return false;
+    }
+    const now = Date.now();
+    if ((this.chatCooldowns.get(message.userId) ?? 0) > now) return false;
+    const safeText = sanitizeChatText(text);
+    if (!safeText) return false;
+    this.chatCooldowns.set(message.userId, now + this.chatCooldownMs);
+    this.options.emit({ type: 'avatar.chat', userId: message.userId, text: safeText });
+    return true;
   }
 
   setAcceptingJoins(acceptingJoins: boolean): void {
@@ -94,6 +112,7 @@ export class ParticipantManager {
     }
     this.participants.clear();
     this.cooldowns.clear();
+    this.chatCooldowns.clear();
   }
 
   private join(userId: string, displayName: string): boolean {
@@ -195,6 +214,7 @@ export class ParticipantManager {
     participant.leaveTimer = setTimeout(() => {
       this.participants.delete(userId);
       this.cooldowns.delete(userId);
+      this.chatCooldowns.delete(userId);
       this.options.emit({ type: 'avatar.removed', userId });
     }, this.leaveDeadlineMs);
     participant.leaveTimer.unref();
@@ -225,6 +245,14 @@ export class ParticipantManager {
 
 function sanitizeDisplayName(value: string): string {
   return value.replace(/[\u0000-\u001F\u007F]/gu, '').trim().slice(0, 25) || 'viewer';
+}
+
+function sanitizeChatText(value: string): string {
+  const normalized = value
+    .replace(/[\u0000-\u001F\u007F]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  return [...normalized].slice(0, 100).join('');
 }
 
 function runTarget(userId: string, sequence: number): { x: number; z: number } {
