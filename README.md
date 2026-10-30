@@ -169,10 +169,21 @@ on a surface that exists only virtually.
 
 ## Live streaming architecture
 
-The reliable WebXR broadcast path is:
+The preferred WebXR broadcast path is:
 
 ```text
 Quest compositor (passthrough + hands + ChatIRL)
+  -> ChatIRL Capture MediaProjection service
+  -> hardware H.264 over TCP/ADB reverse
+  -> supervised Mac receiver (FFmpeg stream-copy to local MPEG-TS)
+  -> OBS Media Source
+  -> Twitch RTMP ingest
+```
+
+The retained fallback is:
+
+```text
+Quest compositor
   -> MQDH USB Cast window
   -> OBS scene and audio mixer
   -> Twitch RTMP ingest
@@ -180,14 +191,10 @@ Quest compositor (passthrough + hands + ChatIRL)
 
 The WebXR page cannot capture passthrough pixels: Meta Quest Browser supplies
 passthrough as a system-composited layer. Capturing the browser canvas would
-therefore produce virtual content without the real room. MQDH is retained
-because it exports the actual compositor image that was validated on the Quest
-3S.
-
-Direct Quest-to-Twitch streaming is not implemented in this WebXR phase. Meta's
-native Android MediaProjection API can capture the headset display with user
-consent, but using it would require a separately installed native Quest app and
-an on-device encoder/RTMP client. It is not callable from this browser app.
+therefore produce virtual content without the real room. The native companion
+captures the compositor after explicit per-session consent while leaving the
+WebXR app in Quest Browser. MQDH remains available until the native path passes
+the full 60–90-minute live stability test.
 
 ### One-time OBS setup
 
@@ -204,10 +211,13 @@ Use OBS Studio 28 or newer; obs-websocket is built in.
    - 2-second keyframe interval
 
    After a stable rehearsal, 1080p30 at 4500 Kbps is a reasonable next step.
-3. Grant OBS macOS **Screen Recording** and **Microphone** permissions. On macOS
-   13+, use **macOS Screen Capture**, not the legacy Window Capture source.
-4. Create an OBS scene named `ChatIRL Live`.
-5. Start MQDH USB casting in **Original (1:1)**. In the OBS scene, add a macOS
+3. Grant OBS **Microphone** permission. Native Quest Capture does not need macOS
+   Screen Recording permission.
+4. Create an OBS scene named `ChatIRL Live`. Add a **Media Source** named
+   `Quest Capture Feed`, uncheck **Local File**, use input
+   `udp://127.0.0.1:49153?fifo_size=1000000&overrun_nonfatal=1`, and set input
+   format to `mpegts`.
+5. For fallback only, start MQDH USB casting in **Original (1:1)** and add a macOS
    Screen Capture source in Window Capture mode, select the MQDH Cast window,
    and name the source `MQDH Cast`.
 6. Fit the square Original image inside the canvas or switch MQDH to **Cropped
@@ -227,7 +237,11 @@ OBS_ENABLED=true
 OBS_WEBSOCKET_URL=ws://127.0.0.1:4455
 OBS_WEBSOCKET_PASSWORD=the_password_from_obs
 OBS_SCENE_NAME=ChatIRL Live
-OBS_CAPTURE_SOURCE_NAME=MQDH Cast
+OBS_NATIVE_CAPTURE_SOURCE_NAME=Quest Capture Feed
+OBS_FALLBACK_CAPTURE_SOURCE_NAME=MQDH Cast
+QUEST_CAPTURE_ENABLED=true
+QUEST_CAPTURE_AUTOSTART=true
+QUEST_CAPTURE_ADB_AUTOCONFIGURE=false
 OBS_MIC_SOURCE_NAME=Streamer Mic
 OBS_MIC_SYNC_OFFSET_MS=0
 ```
@@ -241,30 +255,30 @@ load.
 
 ### Repeatable go-live sequence
 
-1. Connect the Quest over USB and run `adb reverse tcp:8081 tcp:8081`.
-2. Start the ChatIRL server and IWSDK app.
-3. Enter ChatIRL AR on Quest and confirm Twitch chat is connected.
-4. Start MQDH Cast and visually confirm the cast contains the room, tabletop,
-   avatars, and hands.
-5. Open OBS. The `ChatIRL Live` scene must show the same MQDH image and the
+1. Connect the Quest over USB, then start the ChatIRL server and IWSDK app.
+2. Open `http://localhost:8787`, select **Configure USB**, and confirm the Mac
+   receiver is listening.
+3. In **ChatIRL Capture** on Quest, select **Start Capture → Entire View** and
+   approve the required system dialog. Then select **Open ChatIRL**.
+4. Enter ChatIRL AR and confirm Twitch chat is connected.
+5. Open OBS. The `ChatIRL Live` scene must show the native Quest image and the
    microphone meter must move.
-6. Open `http://localhost:8787`. The Broadcast card checks the OBS connection,
-   scene, MQDH source, and optional microphone source.
+6. The dashboard must show Quest connected, encoded video active, and Broadcast
+   capture mode **Native**. A source name alone is not considered healthy.
 7. Select **Start Stream**. ChatIRL switches OBS to `ChatIRL Live`, applies the
    configured microphone delay, and starts the already-configured Twitch
    output. The button remains disabled until Twitch chat and OBS preflight are
    ready.
 8. Select **Stop Stream** on the same dashboard when finished.
 
-Starting MQDH Cast remains one manual action because Meta documents it as an
-MQDH Device Manager operation and does not expose a stable public automation API
-for WebXR projects. Automating the desktop UI would be fragile and could start a
-black or stale capture without a meaningful preflight.
+Android's capture authorization remains a manual, per-session action. The Node
+server now owns receiver startup, USB reverse configuration, bitrate/stall
+monitoring, and OBS preflight. It does not bypass MediaProjection consent.
 
 ### Latency and synchronization
 
 Chat commands should continue to animate the local avatar immediately. The
-viewer sees that result after the MQDH, OBS encode, Twitch ingest, and player
+viewer sees that result after native capture, OBS encode, Twitch ingest, and player
 buffer delays. Do not delay avatar commands to match the broadcast—the same
 video pipeline delays the visible result for every viewer. Enable Twitch Low
 Latency mode and prioritize stable settings over higher resolution.
@@ -285,9 +299,9 @@ with MQDH ADB-over-Wi-Fi casting. Quest's standard cast-to-computer window or
 on-device recording are diagnostic fallbacks; confirm independently that a
 fallback includes passthrough before relying on it for Twitch.
 
-## Phase 2.5 native Quest capture proof of concept
+## Phase 2.5 native Quest capture
 
-An optional companion APK now provides a direct compositor-video experiment:
+The companion APK now provides the preferred compositor-video path:
 
 ```text
 Quest compositor
@@ -300,7 +314,7 @@ Quest compositor
 
 This path does not modify or embed the WebXR experience and does not contain a
 Twitch stream key. The existing MQDH workflow remains available until the native
-feed passes its real-device stability test. Build, installation, OBS setup,
+feed passes its 60–90-minute Twitch stability test. Build, installation, OBS setup,
 diagnostics, and acceptance steps are in
 [quest-capture/README.md](quest-capture/README.md).
 
@@ -318,7 +332,8 @@ Twitch chat
   -> IWSDK Quest client (rendering, animation, direct hand grab)
 
 Quest compositor
-  -> MQDH Cast
+  -> native MediaProjection capture (MQDH fallback)
+  -> supervised H.264/MPEG-TS receiver
   -> OBS controlled through localhost:4455
   -> Twitch live video
 ```

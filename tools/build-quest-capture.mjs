@@ -22,7 +22,7 @@ function resolveAndroidSdk() {
   throw new Error('Set ANDROID_HOME to the installed Android SDK.');
 }
 
-const result = spawnSync('./gradlew', ['assembleDebug'], {
+const result = spawnSync('./gradlew', ['testDebugUnitTest', 'assembleDebug'], {
   cwd: androidProject,
   env: {
     ...process.env,

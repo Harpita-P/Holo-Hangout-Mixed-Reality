@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { isClientMessage, type ServerMessage } from '../shared/protocol.js';
 import { ParticipantManager, type ChatMessage } from './participant-manager.js';
+import { NativeCaptureReceiver } from './native-capture-receiver.js';
 import { ObsController } from './obs-controller.js';
 import {
   TwitchEventSub,
@@ -51,15 +52,47 @@ function statusMessage(): ServerMessage {
 }
 
 const participants = new ParticipantManager({ emit: broadcast });
-const obs = new ObsController({
-  enabled: process.env.OBS_ENABLED === 'true',
-  url: process.env.OBS_WEBSOCKET_URL?.trim() || 'ws://127.0.0.1:4455',
-  password: process.env.OBS_WEBSOCKET_PASSWORD ?? '',
-  sceneName: process.env.OBS_SCENE_NAME?.trim() || 'ChatIRL Live',
-  captureSourceName: process.env.OBS_CAPTURE_SOURCE_NAME?.trim() || 'MQDH Cast',
-  microphoneSourceName: optionalString(process.env.OBS_MIC_SOURCE_NAME),
-  microphoneSyncOffsetMs: boundedIntegerFromEnv('OBS_MIC_SYNC_OFFSET_MS', 0, 0, 5000),
+const captureReceiver = new NativeCaptureReceiver({
+  enabled: process.env.QUEST_CAPTURE_ENABLED === 'true',
+  autoStart: process.env.QUEST_CAPTURE_AUTOSTART !== 'false',
+  autoConfigureUsb: process.env.QUEST_CAPTURE_ADB_AUTOCONFIGURE === 'true',
+  host: '127.0.0.1',
+  inputPort: numberFromEnv('QUEST_CAPTURE_PORT', 49152),
+  obsPort: numberFromEnv('QUEST_CAPTURE_OBS_UDP_PORT', 49153),
+  webPort: numberFromEnv('CHATIRL_HTTPS_PORT', 8081),
+  ffmpegBinary: process.env.FFMPEG_BIN?.trim() || 'ffmpeg',
+  stallThresholdMs: boundedIntegerFromEnv(
+    'QUEST_CAPTURE_STALL_THRESHOLD_MS',
+    3000,
+    1000,
+    30_000,
+  ),
 });
+const obs = new ObsController(
+  {
+    enabled: process.env.OBS_ENABLED === 'true',
+    url: process.env.OBS_WEBSOCKET_URL?.trim() || 'ws://127.0.0.1:4455',
+    password: process.env.OBS_WEBSOCKET_PASSWORD ?? '',
+    sceneName: process.env.OBS_SCENE_NAME?.trim() || 'ChatIRL Live',
+    nativeCaptureSourceName:
+      process.env.OBS_NATIVE_CAPTURE_SOURCE_NAME?.trim() || 'Quest Capture Feed',
+    fallbackCaptureSourceName: optionalString(
+      process.env.OBS_FALLBACK_CAPTURE_SOURCE_NAME ??
+        process.env.OBS_CAPTURE_SOURCE_NAME ??
+        'MQDH Cast',
+    ),
+    microphoneSourceName: optionalString(process.env.OBS_MIC_SOURCE_NAME),
+    microphoneSyncOffsetMs: boundedIntegerFromEnv(
+      'OBS_MIC_SYNC_OFFSET_MS',
+      0,
+      0,
+      5000,
+    ),
+  },
+  () => undefined,
+  undefined,
+  () => captureReceiver.status(),
+);
 const twitch =
   clientId && clientSecret
     ? new TwitchEventSub(
@@ -118,6 +151,9 @@ server.listen(port, host, async () => {
   console.log(`ChatIRL control server: http://localhost:${port}`);
   if (debugCommands) console.log('Local debug chat endpoint enabled.');
   obs.start();
+  if (captureReceiver.status().enabled && captureReceiver.status().autoStart) {
+    captureReceiver.start().catch(reportServerError);
+  }
   if (twitch != null) {
     const savedToken = await loadToken();
     if (savedToken != null) {
@@ -151,6 +187,7 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
         behavior,
       })),
       obs: obsStatus,
+      capture: captureReceiver.status(),
       debugCommands,
     });
     return;
@@ -199,6 +236,36 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
   if (request.method === 'POST' && url.pathname === '/admin/obs/reconnect') {
     requireDashboardToken(await readJson(request));
     await sendObsOperation(response, () => obs.reconnect());
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/admin/obs/capture/native') {
+    requireDashboardToken(await readJson(request));
+    await sendObsOperation(response, () => obs.selectCapture('native'));
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/admin/obs/capture/mqdh') {
+    requireDashboardToken(await readJson(request));
+    await sendObsOperation(response, () => obs.selectCapture('mqdh'));
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/admin/capture/start') {
+    requireDashboardToken(await readJson(request));
+    await sendCaptureOperation(response, () => captureReceiver.start());
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/admin/capture/restart') {
+    requireDashboardToken(await readJson(request));
+    await sendCaptureOperation(response, () => captureReceiver.restart());
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/admin/capture/stop') {
+    requireDashboardToken(await readJson(request));
+    await sendCaptureOperation(response, () => captureReceiver.stop());
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/admin/capture/usb') {
+    requireDashboardToken(await readJson(request));
+    await sendCaptureOperation(response, () => captureReceiver.configureUsb());
     return;
   }
   if (request.method === 'POST' && url.pathname === '/admin/stream/start') {
@@ -252,24 +319,31 @@ body{font:16px/1.5 system-ui,sans-serif;max-width:840px;margin:40px auto;padding
 <body><h1>ChatIRL</h1><small>Local streamer control · Live broadcast</small>
 <section class="card"><h2>Twitch chat</h2><p id="twitch-status" class="${connected ? 'ok' : 'warn'}">${statusText}</p>
 ${configured ? '<a class="button" href="/auth/twitch">Authorize / reconnect Twitch</a>' : '<p>Create <code>.env</code> from <code>.env.example</code>, add your Twitch app credentials, and restart this server.</p>'}</section>
+<section class="card"><h2>Native Quest capture <small>preferred</small></h2><div class="grid">
+<div class="check"><span id="receiver-dot" class="dot"></span><strong>Mac receiver</strong><div id="receiver-status" class="muted">Checking…</div></div>
+<div class="check"><span id="quest-dot" class="dot"></span><strong>Quest connection</strong><div id="quest-status" class="muted">Checking…</div></div>
+<div class="check"><span id="video-dot" class="dot"></span><strong>Encoded video</strong><div id="video-status" class="muted">Checking…</div></div>
+<div class="check"><span id="usb-dot" class="dot"></span><strong>USB transport</strong><div id="usb-status" class="muted">Checking…</div></div></div>
+<div class="actions"><button id="capture-usb">Configure USB</button><button id="capture-restart" class="secondary">Start / Restart Receiver</button><button id="capture-stop" class="danger">Stop Receiver</button></div>
+<p><small>Quest still requires <strong>Start Capture → Entire View</strong> approval for every capture session. ChatIRL monitors encoded byte flow; it cannot prove pixel-to-pixel motion if a compositor sends valid repeated frames.</small></p></section>
 <section class="card"><h2>Broadcast</h2><div class="grid">
 <div class="check"><span id="obs-dot" class="dot"></span><strong>OBS</strong><div id="obs-status" class="muted">Checking…</div></div>
 <div class="check"><span id="scene-dot" class="dot"></span><strong>Scene</strong><div id="scene-status" class="muted">Checking…</div></div>
-<div class="check"><span id="capture-dot" class="dot"></span><strong>MQDH capture</strong><div id="capture-status" class="muted">Checking…</div></div>
+<div class="check"><span id="capture-dot" class="dot"></span><strong>Capture source</strong><div id="capture-status" class="muted">Checking…</div></div>
 <div class="check"><span id="mic-dot" class="dot"></span><strong>Microphone</strong><div id="mic-status" class="muted">Checking…</div></div></div>
 <p id="stream-status" class="warn">Not streaming</p><p id="broadcast-error" class="error"></p>
-<div class="actions"><button id="obs-reconnect" class="secondary">Reconnect OBS</button><button id="start-stream" class="live" disabled>Start Stream</button><button id="stop-stream" class="danger" disabled>Stop Stream</button></div>
-<p><small>Before starting, confirm the MQDH cast window visibly contains passthrough, hands, and avatars. OBS owns the Twitch stream destination; ChatIRL never stores your stream key.</small></p></section>
+<div class="actions"><button id="use-native">Use Native Feed</button><button id="use-mqdh" class="secondary">Use MQDH Fallback</button><button id="obs-reconnect" class="secondary">Reconnect OBS</button><button id="start-stream" class="live" disabled>Start Stream</button><button id="stop-stream" class="danger" disabled>Stop Stream</button></div>
+<p><small>Native Quest Capture is preferred when its receiver and OBS Media Source are healthy. MQDH remains an enabled-source fallback. OBS owns the Twitch destination; ChatIRL never stores your stream key.</small></p></section>
 <section class="card"><h2>Session</h2><p><strong id="participant-count">${participants.snapshot().length}/10</strong> viewer avatars active.</p>
 <button id="allow-joins">Allow joins</button><button id="pause-joins" class="secondary">Pause joins</button><button id="clear-avatars" class="danger">Clear avatars</button></section>
 <section class="card"><h2>Viewer commands</h2><p><code>!join</code> · <code>!run</code> · <code>!wave</code> · <code>!dance</code> · <code>!jump</code> · <code>!leave</code></p><p><small>Each command controls only the sender's avatar. <code>!leave</code> bypasses cooldowns and forcibly releases a held avatar.</small></p></section>
 <script>
 const csrfToken=${csrfToken};let latest=null;const byId=(id)=>document.getElementById(id);
 function dot(id,state,warning=false){const element=byId(id);element.className='dot'+(state?' ok':warning?' warn':'');}
-function render(state){latest=state;const twitch=state.twitch;byId('twitch-status').textContent=twitch.connected?'Connected as '+(twitch.broadcasterLogin||'streamer'):(twitch.error||'Twitch disconnected');byId('twitch-status').className=twitch.connected?'ok':'warn';byId('participant-count').textContent=state.participantCount+'/10';const obs=state.obs;dot('obs-dot',obs.connected,obs.enabled);byId('obs-status').textContent=obs.connected?'Connected · OBS '+(obs.obsVersion||''):obs.enabled?'Disconnected':'Disabled in .env';dot('scene-dot',obs.targetSceneAvailable);byId('scene-status').textContent=obs.targetSceneAvailable?obs.targetScene+' ready':'Need scene: '+obs.targetScene;dot('capture-dot',obs.captureSourceAvailable);byId('capture-status').textContent=obs.captureSourceAvailable?obs.captureSourceName+' ready':'Need source: '+obs.captureSourceName;dot('mic-dot',obs.microphoneSourceAvailable===true,obs.microphoneSourceName===null);byId('mic-status').textContent=obs.microphoneSourceName===null?'Not checked (optional)':obs.microphoneSourceAvailable?obs.microphoneSourceName+' · delay '+obs.microphoneSyncOffsetMs+' ms':'Need source: '+obs.microphoneSourceName;byId('stream-status').textContent=obs.streaming?'LIVE · '+obs.outputTimecode:obs.reconnecting?'OBS reconnecting…':'Not streaming';byId('stream-status').className=obs.streaming?'error':'warn';byId('broadcast-error').textContent=obs.error||'';byId('obs-reconnect').disabled=!obs.enabled;byId('start-stream').disabled=!obs.ready||obs.streaming||!twitch.connected;byId('stop-stream').disabled=!obs.connected||!obs.streaming;}
+function render(state){latest=state;const twitch=state.twitch;byId('twitch-status').textContent=twitch.connected?'Connected as '+(twitch.broadcasterLogin||'streamer'):(twitch.error||'Twitch disconnected');byId('twitch-status').className=twitch.connected?'ok':'warn';byId('participant-count').textContent=state.participantCount+'/10';const capture=state.capture;dot('receiver-dot',capture.listening,capture.enabled);byId('receiver-status').textContent=capture.listening?'Listening on TCP '+capture.inputPort:capture.enabled?'Stopped':'Disabled in .env';dot('quest-dot',capture.receiverConnected,capture.listening);byId('quest-status').textContent=capture.receiverConnected?'Connected'+(capture.reconnectCount?' · '+capture.reconnectCount+' reconnect(s)':''):capture.listening?'Waiting for Start Capture':'Receiver not running';dot('video-dot',capture.videoActive,capture.receiverConnected);byId('video-status').textContent=capture.stalled?'STALLED · '+capture.message:capture.videoActive?capture.bitrateMbps.toFixed(2)+' Mbps · active':capture.message;dot('usb-dot',capture.adbConfigured,capture.enabled);byId('usb-status').textContent=capture.adbConfigured?'ADB reverse ready':'Select Configure USB';byId('capture-usb').disabled=!capture.enabled;byId('capture-restart').disabled=!capture.enabled;byId('capture-stop').disabled=!capture.listening;const obs=state.obs;dot('obs-dot',obs.connected,obs.enabled);byId('obs-status').textContent=obs.connected?'Connected · OBS '+(obs.obsVersion||''):obs.enabled?'Disconnected':'Disabled in .env';dot('scene-dot',obs.targetSceneAvailable);byId('scene-status').textContent=obs.targetSceneAvailable?obs.targetScene+' ready':'Need scene: '+obs.targetScene;dot('capture-dot',obs.captureHealthy,obs.captureMode==='mqdh');byId('capture-status').textContent=obs.captureMode==='native'?'Native · '+obs.captureSourceName+' · '+obs.captureHealthReason:obs.captureMode==='mqdh'?'Fallback · '+obs.captureSourceName+' · verify OBS motion':obs.captureHealthReason;dot('mic-dot',obs.microphoneSourceAvailable===true,obs.microphoneSourceName===null);byId('mic-status').textContent=obs.microphoneSourceName===null?'Not checked (optional)':obs.microphoneSourceAvailable?obs.microphoneSourceName+' · delay '+obs.microphoneSyncOffsetMs+' ms':'Need source: '+obs.microphoneSourceName;byId('stream-status').textContent=obs.streaming?'LIVE · '+obs.outputTimecode:obs.reconnecting?'OBS reconnecting…':'Not streaming';byId('stream-status').className=obs.streaming?'error':'warn';byId('broadcast-error').textContent=obs.error||(capture.enabled&&capture.error?capture.error:'');byId('use-native').disabled=!obs.connected||!capture.videoActive;byId('use-mqdh').disabled=!obs.connected||!obs.fallbackCaptureSourceName;byId('obs-reconnect').disabled=!obs.enabled;byId('start-stream').disabled=!obs.ready||obs.streaming||!twitch.connected;byId('stop-stream').disabled=!obs.connected||!obs.streaming;}
 async function refresh(){try{const response=await fetch('/status',{cache:'no-store'});render(await response.json());}catch(error){byId('broadcast-error').textContent='Dashboard status unavailable: '+error.message;}}
 async function action(path,body={}){const response=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...body,csrfToken})});const result=await response.json();if(!response.ok)throw new Error(result.error||'Request failed');await refresh();return result;}
-byId('obs-reconnect').onclick=()=>action('/admin/obs/reconnect').catch((error)=>byId('broadcast-error').textContent=error.message);byId('start-stream').onclick=()=>{if(confirm('Start the Twitch livestream using the current OBS output settings?'))action('/admin/stream/start').catch((error)=>byId('broadcast-error').textContent=error.message);};byId('stop-stream').onclick=()=>action('/admin/stream/stop').catch((error)=>byId('broadcast-error').textContent=error.message);byId('allow-joins').onclick=()=>action('/admin/joins',{accepting:true});byId('pause-joins').onclick=()=>action('/admin/joins',{accepting:false});byId('clear-avatars').onclick=()=>{if(confirm('Remove all viewer avatars?'))action('/admin/clear');};refresh();setInterval(refresh,1500);
+byId('capture-usb').onclick=()=>action('/admin/capture/usb').catch((error)=>byId('broadcast-error').textContent=error.message);byId('capture-restart').onclick=()=>action('/admin/capture/restart').catch((error)=>byId('broadcast-error').textContent=error.message);byId('capture-stop').onclick=()=>action('/admin/capture/stop').catch((error)=>byId('broadcast-error').textContent=error.message);byId('use-native').onclick=()=>action('/admin/obs/capture/native').catch((error)=>byId('broadcast-error').textContent=error.message);byId('use-mqdh').onclick=()=>action('/admin/obs/capture/mqdh').catch((error)=>byId('broadcast-error').textContent=error.message);byId('obs-reconnect').onclick=()=>action('/admin/obs/reconnect').catch((error)=>byId('broadcast-error').textContent=error.message);byId('start-stream').onclick=()=>{if(confirm('Start the Twitch livestream using the current OBS output settings?'))action('/admin/stream/start').catch((error)=>byId('broadcast-error').textContent=error.message);};byId('stop-stream').onclick=()=>action('/admin/stream/stop').catch((error)=>byId('broadcast-error').textContent=error.message);byId('allow-joins').onclick=()=>action('/admin/joins',{accepting:true});byId('pause-joins').onclick=()=>action('/admin/joins',{accepting:false});byId('clear-avatars').onclick=()=>{if(confirm('Remove all viewer avatars?'))action('/admin/clear');};refresh();setInterval(refresh,1500);
 </script></body></html>`;
 }
 
@@ -323,6 +397,18 @@ async function sendObsOperation(
 ): Promise<void> {
   try {
     sendJson(response, 200, { ok: true, obs: await operation() });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new HttpError(409, message);
+  }
+}
+
+async function sendCaptureOperation(
+  response: ServerResponse,
+  operation: () => Promise<ReturnType<NativeCaptureReceiver['status']>>,
+): Promise<void> {
+  try {
+    sendJson(response, 200, { ok: true, capture: await operation() });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new HttpError(409, message);
@@ -392,6 +478,7 @@ function reportServerError(error: unknown): void {
 function shutdown(): void {
   twitch?.disconnect();
   obs.stop().catch(reportServerError);
+  captureReceiver.stop().catch(reportServerError);
   participants.clear();
   for (const client of clients) client.close(1001, 'ChatIRL server stopping');
   webSockets.close();

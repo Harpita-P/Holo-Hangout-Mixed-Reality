@@ -12,6 +12,7 @@ class FakeObsTransport implements ObsTransport {
   scenes = ['Starting Soon', 'ChatIRL Live'];
   inputs = ['MQDH Cast', 'Streamer Mic'];
   enabledSceneSources = ['MQDH Cast'];
+  mediaState: string | null = null;
   selectedScenes: string[] = [];
   audioOffsets: Array<{ inputName: string; offsetMs: number }> = [];
   startCalls = 0;
@@ -53,6 +54,27 @@ class FakeObsTransport implements ObsTransport {
     return this.enabledSceneSources;
   }
 
+  async getMediaInputState(): Promise<string | null> {
+    return this.mediaState;
+  }
+
+  async setSceneSourceEnabled(
+    _sceneName: string,
+    sourceName: string,
+    enabled: boolean,
+  ): Promise<boolean> {
+    if (!this.inputs.includes(sourceName)) return false;
+    if (enabled && !this.enabledSceneSources.includes(sourceName)) {
+      this.enabledSceneSources.push(sourceName);
+    }
+    if (!enabled) {
+      this.enabledSceneSources = this.enabledSceneSources.filter(
+        (candidate) => candidate !== sourceName,
+      );
+    }
+    return true;
+  }
+
   async setCurrentProgramScene(sceneName: string): Promise<void> {
     this.currentScene = sceneName;
     this.selectedScenes.push(sceneName);
@@ -88,7 +110,8 @@ const config: ObsConfig = {
   url: 'ws://127.0.0.1:4455',
   password: 'test-only',
   sceneName: 'ChatIRL Live',
-  captureSourceName: 'MQDH Cast',
+  nativeCaptureSourceName: 'Quest Capture Feed',
+  fallbackCaptureSourceName: 'MQDH Cast',
   microphoneSourceName: 'Streamer Mic',
   microphoneSyncOffsetMs: 180,
 };
@@ -110,15 +133,114 @@ test('start stream selects the validated scene and applies microphone delay', as
   await controller.stop();
 });
 
-test('preflight blocks a black stream when the MQDH source is disabled in the scene', async () => {
+test('preflight blocks a stream when no capture source is enabled in the scene', async () => {
   const transport = new FakeObsTransport();
   transport.enabledSceneSources = [];
   const controller = new ObsController(config, () => undefined, transport);
 
   const connected = await controller.reconnect();
   assert.equal(connected.ready, false);
-  await assert.rejects(() => controller.startStream(), /MQDH Cast/u);
+  await assert.rejects(() => controller.startStream(), /Quest Capture Feed|MQDH Cast/u);
   assert.equal(transport.startCalls, 0);
+  await controller.stop();
+});
+
+test('native Quest capture is preferred only when bytes are active and OBS is playing it', async () => {
+  const transport = new FakeObsTransport();
+  transport.inputs = ['Quest Capture Feed', 'MQDH Cast', 'Streamer Mic'];
+  transport.enabledSceneSources = ['Quest Capture Feed', 'MQDH Cast'];
+  transport.mediaState = 'OBS_MEDIA_STATE_PLAYING';
+  const controller = new ObsController(
+    config,
+    () => undefined,
+    transport,
+    () => ({
+      enabled: true,
+      videoActive: true,
+      stalled: false,
+      message: 'Quest video is active and relaying to OBS.',
+    }),
+  );
+
+  const status = await controller.reconnect();
+  assert.equal(status.ready, true);
+  assert.equal(status.captureMode, 'native');
+  assert.equal(status.captureSourceName, 'Quest Capture Feed');
+  assert.equal(status.nativeMediaState, 'OBS_MEDIA_STATE_PLAYING');
+  await controller.stop();
+});
+
+test('an existing native source is not considered ready when its feed is stalled', async () => {
+  const transport = new FakeObsTransport();
+  transport.inputs = ['Quest Capture Feed', 'Streamer Mic'];
+  transport.enabledSceneSources = ['Quest Capture Feed'];
+  transport.mediaState = 'OBS_MEDIA_STATE_PLAYING';
+  const controller = new ObsController(
+    config,
+    () => undefined,
+    transport,
+    () => ({
+      enabled: true,
+      videoActive: false,
+      stalled: true,
+      message: 'Encoded video stalled for more than 3 seconds.',
+    }),
+  );
+
+  const status = await controller.reconnect();
+  assert.equal(status.ready, false);
+  assert.equal(status.captureMode, 'none');
+  assert.match(status.error ?? '', /stalled/u);
+  await assert.rejects(() => controller.startStream(), /stalled/u);
+  await controller.stop();
+});
+
+test('MQDH remains available as fallback when native capture is not healthy', async () => {
+  const transport = new FakeObsTransport();
+  transport.inputs = ['Quest Capture Feed', 'MQDH Cast', 'Streamer Mic'];
+  transport.enabledSceneSources = ['Quest Capture Feed', 'MQDH Cast'];
+  transport.mediaState = 'OBS_MEDIA_STATE_STOPPED';
+  const controller = new ObsController(
+    config,
+    () => undefined,
+    transport,
+    () => ({
+      enabled: true,
+      videoActive: false,
+      stalled: false,
+      message: 'Waiting for Quest video.',
+    }),
+  );
+
+  const status = await controller.reconnect();
+  assert.equal(status.ready, true);
+  assert.equal(status.captureMode, 'mqdh');
+  assert.equal(status.captureSourceName, 'MQDH Cast');
+  await controller.stop();
+});
+
+test('dashboard capture selection switches cleanly between native and MQDH sources', async () => {
+  const transport = new FakeObsTransport();
+  transport.inputs = ['Quest Capture Feed', 'MQDH Cast', 'Streamer Mic'];
+  transport.enabledSceneSources = ['MQDH Cast'];
+  transport.mediaState = 'OBS_MEDIA_STATE_PLAYING';
+  const controller = new ObsController(
+    config,
+    () => undefined,
+    transport,
+    () => ({
+      enabled: true,
+      videoActive: true,
+      stalled: false,
+      message: 'Quest video is active and relaying to OBS.',
+    }),
+  );
+
+  await controller.reconnect();
+  assert.equal((await controller.selectCapture('native')).captureMode, 'native');
+  assert.deepEqual(transport.enabledSceneSources, ['Quest Capture Feed']);
+  assert.equal((await controller.selectCapture('mqdh')).captureMode, 'mqdh');
+  assert.deepEqual(transport.enabledSceneSources, ['MQDH Cast']);
   await controller.stop();
 });
 

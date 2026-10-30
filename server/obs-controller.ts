@@ -5,7 +5,8 @@ export interface ObsConfig {
   url: string;
   password: string;
   sceneName: string;
-  captureSourceName: string;
+  nativeCaptureSourceName: string;
+  fallbackCaptureSourceName: string | null;
   microphoneSourceName: string | null;
   microphoneSyncOffsetMs: number;
 }
@@ -20,8 +21,16 @@ export interface ObsStatus {
   currentScene: string | null;
   targetScene: string;
   targetSceneAvailable: boolean;
+  captureMode: 'native' | 'mqdh' | 'none';
   captureSourceName: string;
   captureSourceAvailable: boolean;
+  captureHealthy: boolean;
+  captureHealthReason: string;
+  nativeCaptureSourceName: string;
+  nativeCaptureSourceAvailable: boolean;
+  nativeMediaState: string | null;
+  fallbackCaptureSourceName: string | null;
+  fallbackCaptureSourceAvailable: boolean;
   microphoneSourceName: string | null;
   microphoneSourceAvailable: boolean | null;
   microphoneSyncOffsetMs: number;
@@ -41,6 +50,12 @@ export interface ObsTransport {
   getSceneNames(): Promise<string[]>;
   getInputNames(): Promise<string[]>;
   getEnabledSceneSourceNames(sceneName: string): Promise<string[]>;
+  getMediaInputState(inputName: string): Promise<string | null>;
+  setSceneSourceEnabled(
+    sceneName: string,
+    sourceName: string,
+    enabled: boolean,
+  ): Promise<boolean>;
   setCurrentProgramScene(sceneName: string): Promise<void>;
   setInputAudioSyncOffset(inputName: string, offsetMs: number): Promise<void>;
   startStream(): Promise<void>;
@@ -99,6 +114,35 @@ class ObsWebSocketTransport implements ObsTransport {
       .filter((sourceName): sourceName is string => typeof sourceName === 'string');
   }
 
+  async getMediaInputState(inputName: string): Promise<string | null> {
+    try {
+      return (await this.client.call('GetMediaInputStatus', { inputName })).mediaState ?? null;
+    } catch {
+      // Older OBS/media-source variants may not expose playback status. In that
+      // case the receiver byte-flow check remains the authoritative signal.
+      return null;
+    }
+  }
+
+  async setSceneSourceEnabled(
+    sceneName: string,
+    sourceName: string,
+    enabled: boolean,
+  ): Promise<boolean> {
+    const items = (await this.client.call('GetSceneItemList', { sceneName })).sceneItems;
+    let found = false;
+    for (const item of items) {
+      if (item.sourceName !== sourceName || typeof item.sceneItemId !== 'number') continue;
+      found = true;
+      await this.client.call('SetSceneItemEnabled', {
+        sceneName,
+        sceneItemId: item.sceneItemId,
+        sceneItemEnabled: enabled,
+      });
+    }
+    return found;
+  }
+
   async setCurrentProgramScene(sceneName: string): Promise<void> {
     await this.client.call('SetCurrentProgramScene', { sceneName });
   }
@@ -138,6 +182,17 @@ export class ObsController {
     private readonly config: ObsConfig,
     private readonly onChange: (status: ObsStatus) => void = () => undefined,
     transport?: ObsTransport,
+    private readonly nativeCaptureHealthy: () => {
+      enabled: boolean;
+      videoActive: boolean;
+      stalled: boolean;
+      message: string;
+    } = () => ({
+      enabled: false,
+      videoActive: false,
+      stalled: false,
+      message: 'Native Quest capture is disabled.',
+    }),
   ) {
     this.transport = transport ?? new ObsWebSocketTransport();
     this.state = {
@@ -150,8 +205,16 @@ export class ObsController {
       currentScene: null,
       targetScene: config.sceneName,
       targetSceneAvailable: false,
-      captureSourceName: config.captureSourceName,
+      captureMode: 'none',
+      captureSourceName: config.nativeCaptureSourceName,
       captureSourceAvailable: false,
+      captureHealthy: false,
+      captureHealthReason: 'Waiting for OBS and the Quest receiver.',
+      nativeCaptureSourceName: config.nativeCaptureSourceName,
+      nativeCaptureSourceAvailable: false,
+      nativeMediaState: null,
+      fallbackCaptureSourceName: config.fallbackCaptureSourceName,
+      fallbackCaptureSourceAvailable: false,
       microphoneSourceName: config.microphoneSourceName,
       microphoneSourceAvailable: config.microphoneSourceName == null ? null : false,
       microphoneSyncOffsetMs: config.microphoneSyncOffsetMs,
@@ -161,7 +224,9 @@ export class ObsController {
     this.transport.onDisconnected((message) => this.handleDisconnect(message));
     this.transport.onStreamStateChanged((active) => {
       this.patch({ streaming: active });
-      this.refresh().catch((error) => this.handleError(error));
+      this.refresh().catch((error) => {
+        this.patch({ error: error instanceof Error ? error.message : String(error) });
+      });
     });
   }
 
@@ -205,9 +270,43 @@ export class ObsController {
     const enabledSceneSources = targetSceneAvailable
       ? await this.transport.getEnabledSceneSourceNames(this.config.sceneName)
       : [];
-    const captureSourceAvailable =
-      inputNames.includes(this.config.captureSourceName) &&
-      enabledSceneSources.includes(this.config.captureSourceName);
+    const nativeCaptureSourceAvailable =
+      inputNames.includes(this.config.nativeCaptureSourceName) &&
+      enabledSceneSources.includes(this.config.nativeCaptureSourceName);
+    const fallbackCaptureSourceAvailable =
+      this.config.fallbackCaptureSourceName != null &&
+      inputNames.includes(this.config.fallbackCaptureSourceName) &&
+      enabledSceneSources.includes(this.config.fallbackCaptureSourceName);
+    const nativeMediaState = nativeCaptureSourceAvailable
+      ? await this.transport.getMediaInputState(this.config.nativeCaptureSourceName)
+      : null;
+    const nativeReceiver = this.nativeCaptureHealthy();
+    const nativeMediaPlaying =
+      nativeMediaState == null || nativeMediaState === 'OBS_MEDIA_STATE_PLAYING';
+    const nativeReady =
+      nativeCaptureSourceAvailable &&
+      nativeReceiver.enabled &&
+      nativeReceiver.videoActive &&
+      !nativeReceiver.stalled &&
+      nativeMediaPlaying;
+    const fallbackReady = fallbackCaptureSourceAvailable;
+    const captureMode = nativeReady ? 'native' : fallbackReady ? 'mqdh' : 'none';
+    const captureSourceName =
+      captureMode === 'native'
+        ? this.config.nativeCaptureSourceName
+        : captureMode === 'mqdh' && this.config.fallbackCaptureSourceName != null
+          ? this.config.fallbackCaptureSourceName
+          : this.config.nativeCaptureSourceName;
+    const captureSourceAvailable = nativeReady || fallbackReady;
+    const captureHealthReason = nativeReady
+      ? `Native Quest video active${nativeMediaState == null ? '' : ' · OBS media playing'}.`
+      : fallbackReady
+        ? `Using MQDH fallback; verify motion in the OBS Program view because OBS cannot inspect window pixels.`
+        : this.captureFailureReason({
+            nativeCaptureSourceAvailable,
+            nativeMediaState,
+            nativeReceiver,
+          });
     const microphoneSourceAvailable =
       this.config.microphoneSourceName == null
         ? null
@@ -223,11 +322,19 @@ export class ObsController {
       outputTimecode: stream.outputTimecode,
       currentScene,
       targetSceneAvailable,
+      captureMode,
+      captureSourceName,
       captureSourceAvailable,
+      captureHealthy: captureSourceAvailable,
+      captureHealthReason,
+      nativeCaptureSourceAvailable,
+      nativeMediaState,
+      fallbackCaptureSourceAvailable,
       microphoneSourceAvailable,
       error: ready ? null : this.preflightError({
         targetSceneAvailable,
         captureSourceAvailable,
+        captureHealthReason,
         microphoneSourceAvailable,
       }),
     });
@@ -240,6 +347,24 @@ export class ObsController {
     if (!status.ready) throw new Error(status.error ?? 'OBS preflight failed.');
     if (status.currentScene !== this.config.sceneName) {
       await this.transport.setCurrentProgramScene(this.config.sceneName);
+    }
+    if (
+      status.captureMode === 'native' &&
+      status.fallbackCaptureSourceAvailable &&
+      this.config.fallbackCaptureSourceName != null
+    ) {
+      await this.transport.setSceneSourceEnabled(
+        this.config.sceneName,
+        this.config.fallbackCaptureSourceName,
+        false,
+      );
+    }
+    if (status.captureMode === 'mqdh' && status.nativeCaptureSourceAvailable) {
+      await this.transport.setSceneSourceEnabled(
+        this.config.sceneName,
+        this.config.nativeCaptureSourceName,
+        false,
+      );
     }
     if (
       this.config.microphoneSourceName != null &&
@@ -259,6 +384,43 @@ export class ObsController {
     const status = await this.refresh();
     if (status.streaming) await this.transport.stopStream();
     return this.refresh();
+  }
+
+  async selectCapture(mode: 'native' | 'mqdh'): Promise<ObsStatus> {
+    await this.ensureConnected();
+    const receiver = this.nativeCaptureHealthy();
+    if (mode === 'native' && (!receiver.videoActive || receiver.stalled)) {
+      throw new Error(`Native Quest video is not healthy: ${receiver.message}`);
+    }
+    const sourceName =
+      mode === 'native'
+        ? this.config.nativeCaptureSourceName
+        : this.config.fallbackCaptureSourceName;
+    if (sourceName == null) throw new Error('No MQDH fallback source is configured.');
+    const found = await this.transport.setSceneSourceEnabled(
+      this.config.sceneName,
+      sourceName,
+      true,
+    );
+    if (!found) {
+      throw new Error(`OBS source “${sourceName}” was not found in “${this.config.sceneName}”.`);
+    }
+    const otherSource =
+      mode === 'native'
+        ? this.config.fallbackCaptureSourceName
+        : this.config.nativeCaptureSourceName;
+    if (otherSource != null && otherSource !== sourceName) {
+      await this.transport.setSceneSourceEnabled(
+        this.config.sceneName,
+        otherSource,
+        false,
+      );
+    }
+    const status = await this.refresh();
+    if (status.captureMode !== mode) {
+      throw new Error(status.captureHealthReason);
+    }
+    return status;
   }
 
   private async ensureConnected(): Promise<void> {
@@ -289,7 +451,17 @@ export class ObsController {
       return;
     }
     this.patch({ connected: true, obsVersion, error: null });
-    await this.refresh();
+    try {
+      await this.refresh();
+    } catch (error) {
+      // A failed preflight request does not mean the WebSocket disconnected.
+      // ConnectionClosed is the authoritative transport signal; keeping these
+      // states separate avoids connect/disconnect churn during OBS startup.
+      this.patch({
+        ready: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private handleDisconnect(message: string): void {
@@ -327,18 +499,50 @@ export class ObsController {
   private preflightError(values: {
     targetSceneAvailable: boolean;
     captureSourceAvailable: boolean;
+    captureHealthReason: string;
     microphoneSourceAvailable: boolean | null;
   }): string {
     if (!values.targetSceneAvailable) {
       return `Create an OBS scene named “${this.config.sceneName}”.`;
     }
     if (!values.captureSourceAvailable) {
-      return `Add and enable the MQDH window source in “${this.config.sceneName}”, named “${this.config.captureSourceName}”.`;
+      return values.captureHealthReason;
     }
     if (values.microphoneSourceAvailable === false) {
       return `OBS microphone source “${this.config.microphoneSourceName}” was not found.`;
     }
     return 'OBS preflight failed.';
+  }
+
+  private captureFailureReason(values: {
+    nativeCaptureSourceAvailable: boolean;
+    nativeMediaState: string | null;
+    nativeReceiver: {
+      enabled: boolean;
+      videoActive: boolean;
+      stalled: boolean;
+      message: string;
+    };
+  }): string {
+    if (!values.nativeCaptureSourceAvailable) {
+      const fallback = this.config.fallbackCaptureSourceName == null
+        ? ''
+        : ` Or enable the fallback source “${this.config.fallbackCaptureSourceName}”.`;
+      return `Add and enable OBS Media Source “${this.config.nativeCaptureSourceName}” in “${this.config.sceneName}”.${fallback}`;
+    }
+    if (!values.nativeReceiver.enabled) {
+      return 'Enable and start the native Quest receiver; an OBS source alone is not a live feed.';
+    }
+    if (values.nativeReceiver.stalled || !values.nativeReceiver.videoActive) {
+      return `Native Quest source exists, but video is not active: ${values.nativeReceiver.message}`;
+    }
+    if (
+      values.nativeMediaState != null &&
+      values.nativeMediaState !== 'OBS_MEDIA_STATE_PLAYING'
+    ) {
+      return `OBS Media Source is not playing (${values.nativeMediaState}).`;
+    }
+    return 'No healthy capture source is enabled in the live scene.';
   }
 
   private patch(values: Partial<ObsStatus>): void {
