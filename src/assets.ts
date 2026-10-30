@@ -1,14 +1,80 @@
 import { AssetType, defineAssets } from '@iwsdk/core';
 import {
   createValidationCube,
-  createValidationTabletop,
 } from './scene-assets/chatirl-phase-one.scene-asset.js';
+import { createOrganicTabletop } from './scene-assets/chatirl-environment.scene-asset.js';
 import { createViewerAvatar } from './scene-assets/viewer-avatar.scene-asset.js';
 
 export default defineAssets({
-  'chatirl-tabletop': createValidationTabletop(),
+  'chatirl-tabletop': createOrganicTabletop(),
   'chatirl-cube': createValidationCube(),
   'viewer-avatar': createViewerAvatar(),
+  'environment-base-large': {
+    type: AssetType.GLTF,
+    url: '/environment/Base_Large.gltf',
+    priority: 'critical',
+    name: 'Large Organic Terrain',
+  },
+  'environment-tree-blob-1': {
+    type: AssetType.GLTF,
+    url: '/environment/Tree_Blob_1.gltf',
+    priority: 'critical',
+  },
+  'environment-tree-blob-2': {
+    type: AssetType.GLTF,
+    url: '/environment/Tree_Blob_2.gltf',
+    priority: 'critical',
+  },
+  'environment-tree-spiral-1': {
+    type: AssetType.GLTF,
+    url: '/environment/Tree_Spiral_1.gltf',
+    priority: 'critical',
+  },
+  'environment-bush-1': {
+    type: AssetType.GLTF,
+    url: '/environment/Bush_1.gltf',
+    priority: 'critical',
+  },
+  'environment-bush-2': {
+    type: AssetType.GLTF,
+    url: '/environment/Bush_2.gltf',
+    priority: 'critical',
+  },
+  'environment-grass-1': {
+    type: AssetType.GLTF,
+    url: '/environment/Grass_1.gltf',
+    priority: 'critical',
+  },
+  'environment-grass-2': {
+    type: AssetType.GLTF,
+    url: '/environment/Grass_2.gltf',
+    priority: 'critical',
+  },
+  'environment-plant-1': {
+    type: AssetType.GLTF,
+    url: '/environment/Plant_1.gltf',
+    priority: 'critical',
+  },
+  'environment-plant-2': {
+    type: AssetType.GLTF,
+    url: '/environment/Plant_2.gltf',
+    priority: 'critical',
+  },
+  'environment-rock-1': {
+    type: AssetType.GLTF,
+    url: '/environment/Rock_1.gltf',
+    priority: 'critical',
+  },
+  'environment-rock-2': {
+    type: AssetType.GLTF,
+    url: '/environment/Rock_2.gltf',
+    priority: 'critical',
+  },
+  'environment-rock-large-1': {
+    type: AssetType.GLTF,
+    url: '/environment/Rock_Large_1.gltf',
+    priority: 'critical',
+  },
   'monster-chicken': {
     type: AssetType.GLTF,
     url: '/monsters/chicken.gltf',

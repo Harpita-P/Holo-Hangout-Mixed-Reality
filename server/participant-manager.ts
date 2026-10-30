@@ -6,7 +6,9 @@ import {
 import {
   commandForMonster,
   monsterForSlot,
+  nextMonsterAfter,
   supportedCommands,
+  type MonsterType,
   type MonsterCommandSpec,
 } from '../shared/monsters.js';
 
@@ -31,6 +33,7 @@ export interface ParticipantManagerOptions {
 export class ParticipantManager {
   private readonly participants = new Map<string, ManagedParticipant>();
   private readonly cooldowns = new Map<string, number>();
+  private readonly lastMonsterByUser = new Map<string, MonsterType>();
   private readonly maxParticipants: number;
   private readonly actionCooldownMs: number;
   private readonly leaveDeadlineMs: number;
@@ -101,7 +104,10 @@ export class ParticipantManager {
     if (slot < 0) {
       return false;
     }
-    const monster = monsterForSlot(slot);
+    const lastMonster = this.lastMonsterByUser.get(userId);
+    const monster =
+      lastMonster == null ? monsterForSlot(slot) : nextMonsterAfter(lastMonster);
+    this.lastMonsterByUser.set(userId, monster.type);
     const participant: ManagedParticipant = {
       userId,
       displayName: sanitizeDisplayName(displayName),

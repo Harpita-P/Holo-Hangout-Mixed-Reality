@@ -85,6 +85,11 @@ export function monsterForSlot(slot: number): MonsterDefinition {
   return MONSTER_ROSTER[((slot % MONSTER_ROSTER.length) + MONSTER_ROSTER.length) % MONSTER_ROSTER.length];
 }
 
+export function nextMonsterAfter(type: MonsterType): MonsterDefinition {
+  const index = MONSTER_ROSTER.findIndex((monster) => monster.type === type);
+  return MONSTER_ROSTER[(index + 1) % MONSTER_ROSTER.length];
+}
+
 export function monsterByType(type: MonsterType): MonsterDefinition {
   return MONSTER_ROSTER.find((monster) => monster.type === type) ?? MONSTER_ROSTER[0];
 }

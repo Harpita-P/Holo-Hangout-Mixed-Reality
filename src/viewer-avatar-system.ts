@@ -73,10 +73,10 @@ interface AvatarRuntime {
   autonomySequence: number;
 }
 
-const TABLE_MIN_X = -0.255;
-const TABLE_MAX_X = 0.255;
-const TABLE_MIN_Z = -0.165;
-const TABLE_MAX_Z = 0.165;
+const TABLE_MIN_X = -0.765;
+const TABLE_MAX_X = 0.765;
+const TABLE_MIN_Z = -0.495;
+const TABLE_MAX_Z = 0.495;
 const proceduralFallbackRequested =
   new URLSearchParams(window.location.search).get('proceduralAvatars') === '1';
 
