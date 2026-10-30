@@ -1,0 +1,98 @@
+{
+  "version": "iwsdk.scene.v1",
+  "units": "meters",
+  "components": {
+    "com.iwsdk.components.IBLGradient": {
+      "sky": [0.75, 0.88, 1, 1],
+      "equator": [0.42, 0.56, 0.62, 1],
+      "ground": [0.14, 0.18, 0.2, 1],
+      "intensity": 0.9
+    }
+  },
+  "environment": {
+    "toneMapping": "aces",
+    "exposure": 1.05,
+    "shadows": true,
+    "shadowMapType": "pcf"
+  },
+  "resources": {},
+  "authoring": {
+    "views": [
+      {
+        "id": "hero",
+        "role": "hero",
+        "projection": "perspective",
+        "position": [1.1, 1.55, 1.25],
+        "target": [0, 1.08, -0.75],
+        "fov": 42
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "chatirl-tabletop",
+      "name": "ChatIRL Tabletop — pinch to reposition",
+      "content": {
+        "type": "asset",
+        "asset": "chatirl-tabletop",
+        "castShadow": true,
+        "receiveShadow": true
+      },
+      "transform": {
+        "position": [0, 1.02, -0.75]
+      },
+      "components": {
+        "OneHandGrabbable": {
+          "translate": true,
+          "rotate": true
+        }
+      },
+      "children": [
+        {
+          "id": "chatirl-grab-cube",
+          "name": "ChatIRL Grab Cube",
+          "content": {
+            "type": "asset",
+            "asset": "chatirl-cube",
+            "castShadow": true,
+            "receiveShadow": true
+          },
+          "transform": {
+            "position": [0, 0.1025, 0]
+          },
+          "components": {
+            "OneHandGrabbable": {
+              "translate": true,
+              "rotate": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "key-light",
+      "name": "Key Light",
+      "transform": {
+        "position": [-1.5, 2.8, 0.8],
+        "rotationDeg": [-48, -30, 0]
+      },
+      "components": {
+        "com.iwsdk.components.DirectionalLight": {
+          "color": [1, 0.94, 0.86, 1],
+          "intensity": 2.4,
+          "castShadow": true
+        }
+      }
+    },
+    {
+      "id": "fill-light",
+      "name": "Fill Light",
+      "components": {
+        "com.iwsdk.components.AmbientLight": {
+          "color": [0.62, 0.78, 1, 1],
+          "intensity": 0.55
+        }
+      }
+    }
+  ]
+}
