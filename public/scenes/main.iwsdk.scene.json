@@ -22,9 +22,9 @@
         "id": "hero",
         "role": "hero",
         "projection": "perspective",
-        "position": [1.75, 1.65, 1.3],
+        "position": [2.08, 1.78, 1.58],
         "target": [0, 0.84, -0.75],
-        "fov": 44
+        "fov": 46
       }
     ]
   },
@@ -68,16 +68,125 @@
           }
         },
         {
+          "id": "chatirl-paintball-blaster",
+          "name": "ChatIRL Paintball Blaster",
+          "content": { "type": "asset", "asset": "chatirl-paintball-blaster", "castShadow": true },
+          "transform": { "position": [-0.68, 0.058, 0.34], "rotationDeg": [0, -18, 0] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "PaintballBlaster": { "shotsFired": 0, "hits": 0 }
+          }
+        },
+        {
+          "id": "terrain-island-west",
+          "name": "West Floating Terrain Island",
+          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true, "receiveShadow": true },
+          "transform": { "position": [-1.12, 0.18, -0.16], "rotationDeg": [0, 18, 0], "scale": [0.76, 0.76, 0.76] },
+          "components": { "FloatingTerrain": { "amplitude": 0.012, "speed": 0.72, "phase": 0.3 } },
+          "children": [
+            {
+              "id": "island-west-pink-tree",
+              "name": "West Island Pink Spiral Tree",
+              "content": { "type": "asset", "asset": "environment-tree-spiral-1", "castShadow": true },
+              "transform": { "position": [-0.03, 0.004, -0.01], "rotationDeg": [0, 30, 0], "scale": [0.038, 0.038, 0.038] }
+            },
+            {
+              "id": "island-west-rock",
+              "name": "West Island Rock",
+              "content": { "type": "asset", "asset": "environment-rock-1", "castShadow": true },
+              "transform": { "position": [0.13, 0.008, 0.04], "rotationDeg": [0, -18, 0], "scale": [0.021, 0.021, 0.021] }
+            },
+            {
+              "id": "island-west-grass",
+              "name": "West Island Grass",
+              "content": { "type": "asset", "asset": "environment-grass-1", "castShadow": true },
+              "transform": { "position": [-0.14, 0.003, 0.07], "rotationDeg": [0, 20, 0], "scale": [0.027, 0.027, 0.027] }
+            }
+          ]
+        },
+        {
+          "id": "terrain-island-east",
+          "name": "East Floating Terrain Island",
+          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true, "receiveShadow": true },
+          "transform": { "position": [1.12, 0.105, -0.08], "rotationDeg": [0, -28, 0], "scale": [0.82, 0.82, 0.82] },
+          "components": { "FloatingTerrain": { "amplitude": 0.009, "speed": 0.88, "phase": 2.1 } },
+          "children": [
+            {
+              "id": "island-east-tree",
+              "name": "East Island Blob Tree",
+              "content": { "type": "asset", "asset": "environment-tree-blob-2", "castShadow": true },
+              "transform": { "position": [0.02, 0.004, -0.02], "rotationDeg": [0, -24, 0], "scale": [0.034, 0.034, 0.034] }
+            },
+            {
+              "id": "island-east-bush",
+              "name": "East Island Bush",
+              "content": { "type": "asset", "asset": "environment-bush-2", "castShadow": true },
+              "transform": { "position": [-0.13, 0.01, 0.05], "rotationDeg": [0, 18, 0], "scale": [0.036, 0.036, 0.036] }
+            },
+            {
+              "id": "island-east-plant",
+              "name": "East Island Plant",
+              "content": { "type": "asset", "asset": "environment-plant-2", "castShadow": true },
+              "transform": { "position": [0.14, 0.003, 0.06], "rotationDeg": [0, -10, 0], "scale": [0.027, 0.027, 0.027] }
+            }
+          ]
+        },
+        {
+          "id": "terrain-island-south",
+          "name": "South Floating Terrain Island",
+          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true, "receiveShadow": true },
+          "transform": { "position": [0.18, 0.145, 0.82], "rotationDeg": [0, 42, 0], "scale": [0.68, 0.68, 0.68] },
+          "components": { "FloatingTerrain": { "amplitude": 0.014, "speed": 0.64, "phase": 4.2 } },
+          "children": [
+            {
+              "id": "island-south-tree",
+              "name": "South Island Blob Tree",
+              "content": { "type": "asset", "asset": "environment-tree-blob-1", "castShadow": true },
+              "transform": { "position": [-0.04, 0.004, -0.01], "rotationDeg": [0, 14, 0], "scale": [0.038, 0.038, 0.038] }
+            },
+            {
+              "id": "island-south-rock",
+              "name": "South Island Large Rock",
+              "content": { "type": "asset", "asset": "environment-rock-large-1", "castShadow": true },
+              "transform": { "position": [0.14, 0.006, 0.04], "rotationDeg": [0, -28, 0], "scale": [0.018, 0.018, 0.018] }
+            },
+            {
+              "id": "island-south-grass",
+              "name": "South Island Grass",
+              "content": { "type": "asset", "asset": "environment-grass-2", "castShadow": true },
+              "transform": { "position": [-0.15, 0.003, 0.07], "rotationDeg": [0, 38, 0], "scale": [0.026, 0.026, 0.026] }
+            }
+          ]
+        },
+        {
+          "id": "env-grass-center-west",
+          "name": "Center West Grass Detail",
+          "content": { "type": "asset", "asset": "environment-grass-2", "castShadow": true },
+          "transform": { "position": [-0.3, 0.003, -0.1], "rotationDeg": [0, 22, 0], "scale": [0.015, 0.015, 0.015] }
+        },
+        {
+          "id": "env-grass-center-east",
+          "name": "Center East Grass Detail",
+          "content": { "type": "asset", "asset": "environment-grass-1", "castShadow": true },
+          "transform": { "position": [0.32, 0.003, 0.14], "rotationDeg": [0, -36, 0], "scale": [0.014, 0.014, 0.014] }
+        },
+        {
+          "id": "env-grass-center-north",
+          "name": "Center North Grass Detail",
+          "content": { "type": "asset", "asset": "environment-grass-1", "castShadow": true },
+          "transform": { "position": [0.18, 0.003, -0.27], "rotationDeg": [0, 48, 0], "scale": [0.013, 0.013, 0.013] }
+        },
+        {
           "id": "env-tree-northwest",
           "name": "Northwest Blob Tree",
           "content": { "type": "asset", "asset": "environment-tree-blob-1", "castShadow": true },
-          "transform": { "position": [-0.74, 0.002, -0.48], "rotationDeg": [0, 18, 0], "scale": [0.028, 0.028, 0.028] }
+          "transform": { "position": [-0.52, 0.034, -0.34], "rotationDeg": [0, 18, 0], "scale": [0.026, 0.026, 0.026] }
         },
         {
           "id": "env-bush-northwest",
           "name": "Northwest Bush",
           "content": { "type": "asset", "asset": "environment-bush-1", "castShadow": true },
-          "transform": { "position": [-0.62, 0.014, -0.56], "rotationDeg": [0, -22, 0], "scale": [0.028, 0.028, 0.028] }
+          "transform": { "position": [-0.68, 0.012, -0.48], "rotationDeg": [0, -22, 0], "scale": [0.028, 0.028, 0.028] }
         },
         {
           "id": "env-grass-northwest",
@@ -101,7 +210,7 @@
           "id": "env-tree-northeast",
           "name": "Northeast Blob Tree",
           "content": { "type": "asset", "asset": "environment-tree-blob-2", "castShadow": true },
-          "transform": { "position": [0.7, 0.002, -0.48], "rotationDeg": [0, -28, 0], "scale": [0.034, 0.034, 0.034] }
+          "transform": { "position": [0.58, 0.028, -0.33], "rotationDeg": [0, -28, 0], "scale": [0.03, 0.03, 0.03] }
         },
         {
           "id": "env-bush-northeast",
@@ -126,12 +235,6 @@
           "name": "Northeast Plant",
           "content": { "type": "asset", "asset": "environment-plant-2", "castShadow": true },
           "transform": { "position": [0.58, 0.003, -0.5], "rotationDeg": [0, -10, 0], "scale": [0.025, 0.025, 0.025] }
-        },
-        {
-          "id": "env-tree-west",
-          "name": "West Spiral Tree",
-          "content": { "type": "asset", "asset": "environment-tree-spiral-1", "castShadow": true },
-          "transform": { "position": [-0.83, 0.002, 0.04], "rotationDeg": [0, 12, 0], "scale": [0.038, 0.038, 0.038] }
         },
         {
           "id": "env-bush-west",
@@ -161,7 +264,7 @@
           "id": "env-tree-southeast",
           "name": "Southeast Blob Tree",
           "content": { "type": "asset", "asset": "environment-tree-blob-1", "castShadow": true },
-          "transform": { "position": [0.7, 0.002, 0.48], "rotationDeg": [0, -12, 0], "scale": [0.026, 0.026, 0.026] }
+          "transform": { "position": [0.57, 0.032, 0.36], "rotationDeg": [0, -12, 0], "scale": [0.026, 0.026, 0.026] }
         },
         {
           "id": "env-bush-southeast",
@@ -191,7 +294,7 @@
           "id": "viewer-slot-01",
           "name": "Viewer Slot 01",
           "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
-          "transform": { "position": [-0.5, 0.004, 0.24], "scale": [0.001, 0.001, 0.001] },
+          "transform": { "position": [-0.42, 0.004, 0.16], "scale": [0.001, 0.001, 0.001] },
           "components": {
             "OneHandGrabbable": { "translate": true, "rotate": true },
             "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
@@ -201,7 +304,7 @@
           "id": "viewer-slot-02",
           "name": "Viewer Slot 02",
           "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
-          "transform": { "position": [-0.25, 0.004, 0.3], "scale": [0.001, 0.001, 0.001] },
+          "transform": { "position": [-0.2, 0.004, 0.22], "scale": [0.001, 0.001, 0.001] },
           "components": {
             "OneHandGrabbable": { "translate": true, "rotate": true },
             "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
@@ -211,7 +314,7 @@
           "id": "viewer-slot-03",
           "name": "Viewer Slot 03",
           "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
-          "transform": { "position": [0, 0.004, 0.32], "scale": [0.001, 0.001, 0.001] },
+          "transform": { "position": [0, 0.004, 0.24], "scale": [0.001, 0.001, 0.001] },
           "components": {
             "OneHandGrabbable": { "translate": true, "rotate": true },
             "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
@@ -221,7 +324,7 @@
           "id": "viewer-slot-04",
           "name": "Viewer Slot 04",
           "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
-          "transform": { "position": [0.25, 0.004, 0.3], "scale": [0.001, 0.001, 0.001] },
+          "transform": { "position": [0.2, 0.004, 0.22], "scale": [0.001, 0.001, 0.001] },
           "components": {
             "OneHandGrabbable": { "translate": true, "rotate": true },
             "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
@@ -231,7 +334,7 @@
           "id": "viewer-slot-05",
           "name": "Viewer Slot 05",
           "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
-          "transform": { "position": [0.5, 0.004, 0.24], "scale": [0.001, 0.001, 0.001] },
+          "transform": { "position": [0.42, 0.004, 0.16], "scale": [0.001, 0.001, 0.001] },
           "components": {
             "OneHandGrabbable": { "translate": true, "rotate": true },
             "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
@@ -241,7 +344,7 @@
           "id": "viewer-slot-06",
           "name": "Viewer Slot 06",
           "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
-          "transform": { "position": [-0.5, 0.004, -0.24], "scale": [0.001, 0.001, 0.001] },
+          "transform": { "position": [-0.42, 0.004, -0.16], "scale": [0.001, 0.001, 0.001] },
           "components": {
             "OneHandGrabbable": { "translate": true, "rotate": true },
             "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
@@ -251,7 +354,7 @@
           "id": "viewer-slot-07",
           "name": "Viewer Slot 07",
           "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
-          "transform": { "position": [-0.25, 0.004, -0.3], "scale": [0.001, 0.001, 0.001] },
+          "transform": { "position": [-0.2, 0.004, -0.22], "scale": [0.001, 0.001, 0.001] },
           "components": {
             "OneHandGrabbable": { "translate": true, "rotate": true },
             "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
@@ -261,7 +364,7 @@
           "id": "viewer-slot-08",
           "name": "Viewer Slot 08",
           "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
-          "transform": { "position": [0, 0.004, -0.32], "scale": [0.001, 0.001, 0.001] },
+          "transform": { "position": [0, 0.004, -0.24], "scale": [0.001, 0.001, 0.001] },
           "components": {
             "OneHandGrabbable": { "translate": true, "rotate": true },
             "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
@@ -271,7 +374,7 @@
           "id": "viewer-slot-09",
           "name": "Viewer Slot 09",
           "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
-          "transform": { "position": [0.25, 0.004, -0.3], "scale": [0.001, 0.001, 0.001] },
+          "transform": { "position": [0.2, 0.004, -0.22], "scale": [0.001, 0.001, 0.001] },
           "components": {
             "OneHandGrabbable": { "translate": true, "rotate": true },
             "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
@@ -281,7 +384,7 @@
           "id": "viewer-slot-10",
           "name": "Viewer Slot 10",
           "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
-          "transform": { "position": [0.5, 0.004, -0.24], "scale": [0.001, 0.001, 0.001] },
+          "transform": { "position": [0.42, 0.004, -0.16], "scale": [0.001, 0.001, 0.001] },
           "components": {
             "OneHandGrabbable": { "translate": true, "rotate": true },
             "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }

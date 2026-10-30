@@ -54,6 +54,12 @@ interface AvatarRuntime {
   bubbleText: string;
   bubbleShownAt: number;
   bubbleExpiresAt: number;
+  splatter: Sprite | null;
+  hitStartedAt: number;
+  hitRespawnAt: number;
+  hitOriginX: number;
+  hitOriginZ: number;
+  lastHitSequence: number;
   monster: MonsterDefinition | null;
   monsterVisual: Object3D | null;
   mixer: AnimationMixer | null;
@@ -81,6 +87,13 @@ const TABLE_MIN_X = -0.765;
 const TABLE_MAX_X = 0.765;
 const TABLE_MIN_Z = -0.495;
 const TABLE_MAX_Z = 0.495;
+const TERRAIN_RADIUS_X = 0.79;
+const TERRAIN_RADIUS_Z = 0.49;
+const TERRAIN_OBSTACLES = [
+  { x: -0.52, z: -0.34, radius: 0.18 },
+  { x: 0.58, z: -0.33, radius: 0.15 },
+  { x: 0.57, z: 0.36, radius: 0.17 },
+] as const;
 const proceduralFallbackRequested =
   new URLSearchParams(window.location.search).get('proceduralAvatars') === '1';
 
@@ -152,9 +165,14 @@ export class ViewerAvatarSystem extends createSystem({
       if (message != null) this.applyMessage(message, time);
     }
     for (const [entity, runtime] of this.runtimes) {
+      this.syncPaintballHit(runtime, time);
+      this.updateBubble(runtime, time);
+      if (runtime.hitRespawnAt > 0) {
+        this.updatePaintballHit(runtime, time);
+        continue;
+      }
       if (!entity.object3D?.visible) continue;
       runtime.mixer?.update(Math.min(delta, 1 / 15));
-      this.updateBubble(runtime, time);
       if (runtime.held || this.queries.held.entities.has(entity)) continue;
       this.animate(entity, runtime, delta, time);
     }
@@ -186,6 +204,12 @@ export class ViewerAvatarSystem extends createSystem({
       bubbleText: '',
       bubbleShownAt: 0,
       bubbleExpiresAt: 0,
+      splatter: null,
+      hitStartedAt: 0,
+      hitRespawnAt: 0,
+      hitOriginX: object.position.x,
+      hitOriginZ: object.position.z,
+      lastHitSequence: entity.getValue(ViewerAvatar, 'paintballHitSequence') ?? 0,
       monster: null,
       monsterVisual: null,
       mixer: null,
@@ -257,7 +281,7 @@ export class ViewerAvatarSystem extends createSystem({
     if (previousEntity != null && previousEntity !== entity) this.deactivate(participant.userId);
 
     const object = entity.object3D;
-    const wasVisible = object.visible;
+    const wasVisible = object.visible || runtime.hitRespawnAt > 0;
     this.userEntities.set(participant.userId, entity);
     entity.setValue(ViewerAvatar, 'userId', participant.userId);
     entity.setValue(ViewerAvatar, 'displayName', participant.displayName);
@@ -280,7 +304,7 @@ export class ViewerAvatarSystem extends createSystem({
       runtime.spawnEndsAt = time + 0.35;
       runtime.nextDecisionAt = time + 0.65 + seededUnit(entity.index, 1) * 1.2;
     }
-    object.visible = true;
+    object.visible = runtime.hitRespawnAt <= 0;
     runtime.actionStartedAt = time;
     runtime.leavingAt = 0;
     this.applyColor(object, participant.colorHex);
@@ -400,6 +424,12 @@ export class ViewerAvatarSystem extends createSystem({
     if (entity == null || runtime == null) return;
     entity.setValue(ViewerAvatar, 'behavior', AvatarBehaviors.Leaving);
     entity.setValue(MonsterAvatar, 'state', MonsterStates.Leaving);
+    runtime.hitRespawnAt = 0;
+    this.removePaintSplatter(runtime);
+    if (entity.object3D != null) {
+      entity.object3D.visible = true;
+      entity.object3D.scale.setScalar(1);
+    }
     runtime.commandBehavior = null;
     runtime.actionStartedAt = time;
     runtime.leavingAt = time + Math.max(0, Math.min(deadlineMs, 1000)) / 1000;
@@ -423,11 +453,136 @@ export class ViewerAvatarSystem extends createSystem({
     entity.setValue(ViewerAvatar, 'userId', '');
     entity.setValue(ViewerAvatar, 'displayName', '');
     entity.setValue(ViewerAvatar, 'behavior', AvatarBehaviors.Idle);
+    entity.setValue(ViewerAvatar, 'paintballHitSequence', 0);
     entity.setValue(MonsterAvatar, 'state', MonsterStates.Autonomous);
     entity.setValue(MonsterAvatar, 'activeClip', '');
+    runtime.hitRespawnAt = 0;
+    runtime.lastHitSequence = 0;
+    this.removePaintSplatter(runtime);
     this.removeBubble(runtime);
     this.removeLabel(runtime);
     this.userEntities.delete(userId);
+  }
+
+  private syncPaintballHit(runtime: AvatarRuntime, time: number): void {
+    const sequence = runtime.entity.getValue(ViewerAvatar, 'paintballHitSequence') ?? 0;
+    if (sequence === runtime.lastHitSequence) return;
+    runtime.lastHitSequence = sequence;
+    if (sequence > 0) this.beginPaintballHit(runtime, time);
+  }
+
+  private beginPaintballHit(runtime: AvatarRuntime, time: number): void {
+    const entity = runtime.entity;
+    const object = entity.object3D;
+    if (
+      object == null ||
+      !object.visible ||
+      entity.getValue(ViewerAvatar, 'behavior') === AvatarBehaviors.Leaving
+    ) {
+      return;
+    }
+    if (this.queries.held.entities.has(entity)) this.grabSystem?.forceRelease(entity);
+    runtime.hitOriginX = object.position.x;
+    runtime.hitOriginZ = object.position.z;
+    runtime.hitStartedAt = time;
+    runtime.hitRespawnAt = time + 0.58;
+    runtime.moving = false;
+    this.removePaintSplatter(runtime);
+    runtime.splatter = this.createPaintSplatter(runtime);
+    object.visible = false;
+  }
+
+  private createPaintSplatter(runtime: AvatarRuntime): Sprite | null {
+    const object = runtime.entity.object3D;
+    const parent = object?.parent;
+    if (object == null || parent == null) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const context = canvas.getContext('2d');
+    if (context == null) return null;
+    context.fillStyle = '#FF3F9B';
+    context.beginPath();
+    context.arc(128, 128, 62, 0, Math.PI * 2);
+    for (let index = 0; index < 10; index += 1) {
+      const angle = (index / 10) * Math.PI * 2;
+      const distance = index % 2 === 0 ? 88 : 74;
+      context.moveTo(128 + Math.cos(angle) * distance + 14, 128 + Math.sin(angle) * distance);
+      context.arc(
+        128 + Math.cos(angle) * distance,
+        128 + Math.sin(angle) * distance,
+        index % 2 === 0 ? 14 : 9,
+        0,
+        Math.PI * 2,
+      );
+    }
+    context.fill();
+    context.fillStyle = '#FFD2E8';
+    context.beginPath();
+    context.arc(109, 105, 18, 0, Math.PI * 2);
+    context.fill();
+
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.minFilter = LinearFilter;
+    const material = new SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+    const splatter = new Sprite(material);
+    splatter.name = 'Paintball Pink Splatter';
+    splatter.position.copy(object.position);
+    splatter.position.y += (runtime.monster?.targetHeight ?? 0.18) * 0.55;
+    splatter.scale.setScalar(0.001);
+    splatter.renderOrder = 30;
+    parent.add(splatter);
+    return splatter;
+  }
+
+  private updatePaintballHit(runtime: AvatarRuntime, time: number): void {
+    const elapsed = Math.max(0, time - runtime.hitStartedAt);
+    if (runtime.splatter != null) {
+      const pop = elasticOut(clamp(elapsed / 0.16, 0, 1));
+      const fade = 1 - clamp((elapsed - 0.3) / 0.25, 0, 1);
+      runtime.splatter.scale.setScalar(0.28 + pop * 0.22);
+      runtime.splatter.material.opacity = fade;
+    }
+    if (time < runtime.hitRespawnAt) return;
+    const object = runtime.entity.object3D;
+    if (object == null) return;
+    const next = this.pickRespawnPosition(runtime);
+    object.position.set(next.x, this.restingY(runtime, time), next.z);
+    object.rotation.set(0, 0, 0);
+    object.scale.setScalar(0.001);
+    object.visible = true;
+    runtime.hitRespawnAt = 0;
+    runtime.spawnEndsAt = time + 0.35;
+    runtime.nextDecisionAt = time + 0.8;
+    runtime.entity.setValue(MonsterAvatar, 'state', MonsterStates.Spawn);
+    this.removePaintSplatter(runtime);
+  }
+
+  private pickRespawnPosition(runtime: AvatarRuntime): { x: number; z: number } {
+    for (let attempt = 0; attempt < 14; attempt += 1) {
+      const sequence = runtime.lastHitSequence * 17 + attempt;
+      const candidate = {
+        x: TABLE_MIN_X + 0.04 + seededUnit(runtime.entity.index, sequence) * (TABLE_MAX_X - TABLE_MIN_X - 0.08),
+        z: TABLE_MIN_Z + 0.04 + seededUnit(runtime.entity.index + 29, sequence) * (TABLE_MAX_Z - TABLE_MIN_Z - 0.08),
+      };
+      if (
+        isPlayablePosition(candidate.x, candidate.z) &&
+        Math.hypot(candidate.x - runtime.hitOriginX, candidate.z - runtime.hitOriginZ) >= 0.28
+      ) {
+        return candidate;
+      }
+    }
+    return { x: -runtime.hitOriginX * 0.7, z: -runtime.hitOriginZ * 0.7 };
+  }
+
+  private removePaintSplatter(runtime: AvatarRuntime): void {
+    const splatter = runtime.splatter;
+    if (splatter == null) return;
+    splatter.removeFromParent();
+    splatter.material.map?.dispose();
+    splatter.material.dispose();
+    runtime.splatter = null;
   }
 
   private animate(entity: Entity, runtime: AvatarRuntime, delta: number, time: number): void {
@@ -533,6 +688,7 @@ export class ViewerAvatarSystem extends createSystem({
         x: TABLE_MIN_X + 0.025 + seededUnit(runtime.entity.index, sequence) * (TABLE_MAX_X - TABLE_MIN_X - 0.05),
         z: TABLE_MIN_Z + 0.025 + seededUnit(runtime.entity.index + 17, sequence) * (TABLE_MAX_Z - TABLE_MIN_Z - 0.05),
       };
+      if (!isPlayablePosition(candidate.x, candidate.z)) continue;
       const crowded = [...this.runtimes.values()].some(
         (other) =>
           other !== runtime &&
@@ -705,7 +861,7 @@ export class ViewerAvatarSystem extends createSystem({
       entity == null ||
       runtime == null ||
       entity.object3D == null ||
-      !entity.object3D.visible ||
+      (!entity.object3D.visible && runtime.hitRespawnAt <= 0) ||
       entity.getValue(ViewerAvatar, 'behavior') === AvatarBehaviors.Leaving
     ) {
       return;
@@ -838,6 +994,14 @@ function wrapBubbleText(
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function isPlayablePosition(x: number, z: number): boolean {
+  const insideTerrain = (x / TERRAIN_RADIUS_X) ** 2 + (z / TERRAIN_RADIUS_Z) ** 2 <= 1;
+  if (!insideTerrain) return false;
+  return !TERRAIN_OBSTACLES.some(
+    (obstacle) => Math.hypot(x - obstacle.x, z - obstacle.z) < obstacle.radius,
+  );
 }
 
 function seededUnit(first: number, second: number): number {

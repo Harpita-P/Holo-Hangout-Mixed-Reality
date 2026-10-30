@@ -13,4 +13,5 @@ export const ViewerAvatar = createComponent('ViewerAvatar', {
   actionSequence: { type: Types.Int32, default: 0 },
   targetX: { type: Types.Float32, default: 0 },
   targetZ: { type: Types.Float32, default: 0 },
+  paintballHitSequence: { type: Types.Int32, default: 0 },
 });

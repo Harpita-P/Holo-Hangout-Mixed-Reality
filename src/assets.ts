@@ -3,11 +3,15 @@ import {
   createValidationCube,
 } from './scene-assets/chatirl-phase-one.scene-asset.js';
 import { createOrganicTabletop } from './scene-assets/chatirl-environment.scene-asset.js';
+import { createFloatingTerrainIsland } from './scene-assets/chatirl-environment.scene-asset.js';
+import { createPaintballBlaster } from './scene-assets/paintball-blaster.scene-asset.js';
 import { createViewerAvatar } from './scene-assets/viewer-avatar.scene-asset.js';
 
 export default defineAssets({
   'chatirl-tabletop': createOrganicTabletop(),
+  'chatirl-floating-island': createFloatingTerrainIsland(),
   'chatirl-cube': createValidationCube(),
+  'chatirl-paintball-blaster': createPaintballBlaster(),
   'viewer-avatar': createViewerAvatar(),
   'environment-base-large': {
     type: AssetType.GLTF,
