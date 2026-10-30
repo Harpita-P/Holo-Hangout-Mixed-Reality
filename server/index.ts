@@ -35,6 +35,7 @@ let twitchStatus: TwitchStatus = {
       ? null
       : 'Add TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET to .env.',
 };
+let twitch: TwitchEventSub | null = null;
 
 function broadcast(message: ServerMessage): void {
   const payload = JSON.stringify(message);
@@ -51,7 +52,17 @@ function statusMessage(): ServerMessage {
   };
 }
 
-const participants = new ParticipantManager({ emit: broadcast });
+const participants = new ParticipantManager({
+  emit: broadcast,
+  onRealViewerJoined: (participant) => {
+    const abilities = participant.supportedCommands
+      .filter((command) => command !== '!join' && command !== '!leave')
+      .join(' ');
+    twitch?.sendChatMessage(
+      `@${participant.displayName} joined ChatIRL as ${participant.monsterName}! Abilities: ${abilities}`,
+    );
+  },
+});
 const captureReceiver = new NativeCaptureReceiver({
   enabled: process.env.QUEST_CAPTURE_ENABLED === 'true',
   autoStart: process.env.QUEST_CAPTURE_AUTOSTART !== 'false',
@@ -93,7 +104,7 @@ const obs = new ObsController(
   undefined,
   () => captureReceiver.status(),
 );
-const twitch =
+twitch =
   clientId && clientSecret
     ? new TwitchEventSub(
         { clientId, clientSecret, redirectUri },
@@ -179,11 +190,12 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
     const obsStatus = obs.status().connected
       ? await obs.refresh().catch(() => obs.status())
       : obs.status();
+    const realParticipants = participants.snapshot().filter(({ isBot }) => !isBot);
     sendJson(response, 200, {
       twitch: twitchStatus,
       acceptingJoins: participants.snapshotMessage().acceptingJoins,
-      participantCount: participants.snapshot().length,
-      participants: participants.snapshot().map(
+      participantCount: realParticipants.length,
+      participants: realParticipants.map(
         ({ displayName, behavior, monsterName, monsterCategory, supportedCommands }) => ({
           displayName,
           behavior,
@@ -224,6 +236,18 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
     }
     await twitch.authorize(code);
     redirect(response, '/');
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/demo/status') {
+    sendJson(response, 200, participants.demoStatus());
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/demo/on') {
+    sendJson(response, 200, participants.setDemoMode(true));
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/demo/off') {
+    sendJson(response, 200, participants.setDemoMode(false));
     return;
   }
   if (request.method === 'POST' && url.pathname === '/admin/joins') {
@@ -340,7 +364,7 @@ ${configured ? '<a class="button" href="/auth/twitch">Authorize / reconnect Twit
 <p id="stream-status" class="warn">Not streaming</p><p id="broadcast-error" class="error"></p>
 <div class="actions"><button id="use-native">Use Native Feed</button><button id="use-mqdh" class="secondary">Use MQDH Fallback</button><button id="obs-reconnect" class="secondary">Reconnect OBS</button><button id="start-stream" class="live" disabled>Start Stream</button><button id="stop-stream" class="danger" disabled>Stop Stream</button></div>
 <p><small>Native Quest Capture is preferred when its receiver and OBS Media Source are healthy. MQDH remains an enabled-source fallback. OBS owns the Twitch destination; ChatIRL never stores your stream key.</small></p></section>
-<section class="card"><h2>Session</h2><p><strong id="participant-count">${participants.snapshot().length}/10</strong> viewer avatars active.</p>
+<section class="card"><h2>Session</h2><p><strong id="participant-count">${participants.demoStatus().realParticipantCount}/10</strong> viewer avatars active.</p>
 <button id="allow-joins">Allow joins</button><button id="pause-joins" class="secondary">Pause joins</button><button id="clear-avatars" class="danger">Clear avatars</button><div id="participant-list"><small>No monsters have joined yet.</small></div></section>
 <section class="card"><h2>Viewer commands</h2><p><strong>Big</strong><br><code>!run · !jump · !wave · !duck · !punch · !yes · !no</code></p><p><strong>Blob</strong><br><code>!dance · !jump · !bite · !walk · !yes · !no</code></p><p><strong>Flying</strong><br><code>!fly · !headbutt · !punch · !yes · !no</code></p><p><small>Every monster supports <code>!join</code> and <code>!leave</code>. Commands control only the sender's monster; unsupported commands are ignored. <code>!leave</code> forcibly releases a held monster.</small></p></section>
 <script>

@@ -3,8 +3,10 @@ import {
   type AnimationClip,
   AnimationMixer,
   Box3,
+  BoxGeometry,
   CanvasTexture,
   Color,
+  ConeGeometry,
   createSystem,
   type Entity,
   Grabbed,
@@ -16,6 +18,8 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  OctahedronGeometry,
+  Quaternion,
   SphereGeometry,
   Sprite,
   SpriteMaterial,
@@ -36,9 +40,11 @@ import {
   type AvatarBehavior,
   type ParticipantSnapshot,
   type CommunityLeaderboardEntry,
+  type ReactionType,
   type ServerMessage,
 } from '../shared/protocol.js';
 import { ChatIRLSocket, type SocketStatus } from './chatirl-socket.js';
+import { ShoutoutTracker } from '../shared/shoutout-tracker.js';
 import { MonsterAvatar, MonsterStates } from './monster-avatar-component.js';
 import { ViewerAvatar } from './viewer-avatar-component.js';
 
@@ -55,6 +61,7 @@ interface AvatarRuntime {
   rightArm: Object3D | null;
   label: Sprite | null;
   labelText: string;
+  labelIsBot: boolean;
   bubble: Sprite | null;
   bubbleText: string;
   bubbleShownAt: number;
@@ -95,6 +102,33 @@ interface PaintImpact {
   particles: Mesh[];
 }
 
+interface ReactionEffect {
+  root: Group;
+  origin: Vector3;
+  direction: Vector3;
+  startedAt: number;
+  materials: MeshBasicMaterial[];
+  label: Sprite;
+}
+
+interface WelcomeNotice {
+  sprite: Sprite;
+  shownAt: number;
+  expiresAt: number;
+}
+
+interface ShoutoutEffect {
+  root: Group;
+  entity: Entity | null;
+  origin: Vector3;
+  startedAt: number;
+  halo: Mesh[];
+  spotlight: Mesh;
+  stars: Mesh[];
+  materials: MeshBasicMaterial[];
+  label: Sprite;
+}
+
 const TABLE_MIN_X = -0.765;
 const TABLE_MAX_X = 0.765;
 const TABLE_MIN_Z = -0.495;
@@ -109,6 +143,10 @@ const TERRAIN_OBSTACLES = [
 const impactCoreGeometry = new SphereGeometry(0.5, 12, 8);
 const impactRingGeometry = new TorusGeometry(0.5, 0.055, 6, 24);
 const impactParticleGeometry = new SphereGeometry(0.09, 8, 6);
+const reactionSphereGeometry = new SphereGeometry(0.5, 10, 7);
+const reactionBoxGeometry = new BoxGeometry(1, 1, 1, 1, 1, 1);
+const reactionConeGeometry = new ConeGeometry(0.5, 1, 8, 1);
+const shoutoutStarGeometry = new OctahedronGeometry(0.5, 0);
 const proceduralFallbackRequested =
   new URLSearchParams(window.location.search).get('proceduralAvatars') === '1';
 
@@ -131,6 +169,10 @@ export class ViewerAvatarSystem extends createSystem({
   private leaderboardCanvas: HTMLCanvasElement | null = null;
   private bannerPanel: Sprite | null = null;
   private bannerCanvas: HTMLCanvasElement | null = null;
+  private readonly reactionEffects: ReactionEffect[] = [];
+  private readonly shoutoutTracker = new ShoutoutTracker();
+  private readonly shoutoutEffects: ShoutoutEffect[] = [];
+  private welcomeNotice: WelcomeNotice | null = null;
   private currentTime = 0;
 
   init(): void {
@@ -152,6 +194,9 @@ export class ViewerAvatarSystem extends createSystem({
         this.playFirstAvailable(runtime, ['HitReact', 'HitRecieve'], false, this.currentTime);
       }
       const userId = entity.getValue(ViewerAvatar, 'userId');
+      if (userId && runtime != null) {
+        this.shoutoutTracker.begin(userId, runtime.labelIsBot, this.currentTime);
+      }
       if (userId) this.socket?.send({ type: 'avatar.held', userId, held: true });
     });
     const offReleased = this.queries.held.subscribe('disqualify', (entity) => {
@@ -168,6 +213,7 @@ export class ViewerAvatarSystem extends createSystem({
         }
       }
       const userId = entity.getValue(ViewerAvatar, 'userId');
+      if (userId) this.shoutoutTracker.release(userId);
       if (userId) this.socket?.send({ type: 'avatar.held', userId, held: false });
     });
     this.cleanupFuncs.push(offHeld, offReleased);
@@ -176,7 +222,13 @@ export class ViewerAvatarSystem extends createSystem({
       (message) => this.messageQueue.push(message),
       (status) => this.setSocketStatus(status),
     );
-    this.cleanupFuncs.push(() => this.socket.close());
+    this.cleanupFuncs.push(() => {
+      this.socket.close();
+      this.removeWelcomeNotice();
+      for (const effect of [...this.reactionEffects]) this.removeReactionEffect(effect);
+      for (const effect of [...this.shoutoutEffects]) this.removeShoutoutEffect(effect);
+      this.shoutoutTracker.clear();
+    });
   }
 
   update(delta: number, time: number): void {
@@ -196,6 +248,12 @@ export class ViewerAvatarSystem extends createSystem({
       runtime.mixer?.update(Math.min(delta, 1 / 15));
       if (runtime.held || this.queries.held.entities.has(entity)) continue;
       this.animate(entity, runtime, delta, time);
+    }
+    this.updateReactionEffects(time);
+    this.updateWelcomeNotice(time);
+    this.updateShoutoutEffects(time);
+    for (const userId of this.shoutoutTracker.update(time)) {
+      this.createShoutoutCelebration(userId, time);
     }
   }
 
@@ -221,6 +279,7 @@ export class ViewerAvatarSystem extends createSystem({
       rightArm: object.getObjectByName('Right Arm') ?? null,
       label: null,
       labelText: '',
+      labelIsBot: false,
       bubble: null,
       bubbleText: '',
       bubbleShownAt: 0,
@@ -265,6 +324,12 @@ export class ViewerAvatarSystem extends createSystem({
         break;
       case 'avatar.chat':
         this.showBubble(message.userId, message.text, time);
+        break;
+      case 'viewer.welcome':
+        this.showWelcomeNotice(message.displayName, time);
+        break;
+      case 'avatar.reaction':
+        this.showReaction(message.userId, message.reaction, time);
         break;
       case 'avatar.action':
         this.applyAction(message.userId, message.behavior, message.actionSequence, message.targetX, message.targetZ, time);
@@ -324,7 +389,10 @@ export class ViewerAvatarSystem extends createSystem({
 
     if (!wasVisible) {
       entity.setValue(MonsterAvatar, 'state', MonsterStates.Spawn);
-      object.position.set(runtime.initialX, this.restingY(runtime, time), runtime.initialZ);
+      const spawn = this.pickSpawnPosition(runtime);
+      object.position.set(spawn.x, this.restingY(runtime, time), spawn.z);
+      runtime.destinationX = spawn.x;
+      runtime.destinationZ = spawn.z;
       object.rotation.set(0, 0, 0);
       object.scale.setScalar(0.001);
       runtime.spawnEndsAt = time + 0.35;
@@ -334,7 +402,7 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.actionStartedAt = time;
     runtime.leavingAt = 0;
     this.applyColor(object, participant.colorHex);
-    this.setLabel(runtime, participant.displayName);
+    this.setLabel(runtime, participant.displayName, participant.isBot);
     if (!wasVisible && participant.behavior === AvatarBehaviors.Idle) {
       const idleClip = MONSTER_AUTONOMY_CLIPS[monster.category].idle;
       this.playClip(runtime, idleClip, true, time);
@@ -448,6 +516,7 @@ export class ViewerAvatarSystem extends createSystem({
     const entity = this.userEntities.get(userId);
     const runtime = entity == null ? null : this.runtimes.get(entity);
     if (entity == null || runtime == null) return;
+    this.shoutoutTracker.cancel(userId);
     entity.setValue(ViewerAvatar, 'behavior', AvatarBehaviors.Leaving);
     entity.setValue(MonsterAvatar, 'state', MonsterStates.Leaving);
     runtime.hitRespawnAt = 0;
@@ -468,6 +537,7 @@ export class ViewerAvatarSystem extends createSystem({
     const entity = this.userEntities.get(userId);
     const runtime = entity == null ? null : this.runtimes.get(entity);
     if (entity == null || runtime == null || entity.object3D == null) return;
+    this.shoutoutTracker.cancel(userId);
     if (this.queries.held.entities.has(entity)) this.grabSystem?.forceRelease(entity);
     runtime.mixer?.stopAllAction();
     runtime.activeAction = null;
@@ -507,6 +577,8 @@ export class ViewerAvatarSystem extends createSystem({
     ) {
       return;
     }
+    const userId = entity.getValue(ViewerAvatar, 'userId');
+    if (userId) this.shoutoutTracker.cancel(userId);
     if (this.queries.held.entities.has(entity)) this.grabSystem?.forceRelease(entity);
     runtime.hitOriginX = object.position.x;
     runtime.hitOriginZ = object.position.z;
@@ -721,22 +793,46 @@ export class ViewerAvatarSystem extends createSystem({
 
   private pickDestination(runtime: AvatarRuntime): { x: number; z: number } {
     let candidate = { x: runtime.initialX, z: runtime.initialZ };
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
       const sequence = runtime.autonomySequence * 11 + attempt;
       candidate = {
-        x: TABLE_MIN_X + 0.025 + seededUnit(runtime.entity.index, sequence) * (TABLE_MAX_X - TABLE_MIN_X - 0.05),
-        z: TABLE_MIN_Z + 0.025 + seededUnit(runtime.entity.index + 17, sequence) * (TABLE_MAX_Z - TABLE_MIN_Z - 0.05),
+        x: TABLE_MIN_X + 0.012 + seededUnit(runtime.entity.index, sequence) * (TABLE_MAX_X - TABLE_MIN_X - 0.024),
+        z: TABLE_MIN_Z + 0.012 + seededUnit(runtime.entity.index + 17, sequence) * (TABLE_MAX_Z - TABLE_MIN_Z - 0.024),
       };
       if (!isPlayablePosition(candidate.x, candidate.z)) continue;
       const crowded = [...this.runtimes.values()].some(
         (other) =>
           other !== runtime &&
           other.entity.object3D?.visible &&
-          Math.hypot(other.entity.object3D.position.x - candidate.x, other.entity.object3D.position.z - candidate.z) < 0.065,
+          Math.hypot(other.entity.object3D.position.x - candidate.x, other.entity.object3D.position.z - candidate.z) < 0.1,
       );
       if (!crowded) break;
     }
     return candidate;
+  }
+
+  private pickSpawnPosition(runtime: AvatarRuntime): { x: number; z: number } {
+    let fallback = { x: runtime.initialX, z: runtime.initialZ };
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      const sequence = runtime.entity.index * 37 + attempt + 1;
+      const candidate = {
+        x: TABLE_MIN_X + 0.018 + seededUnit(runtime.entity.index + 41, sequence) * (TABLE_MAX_X - TABLE_MIN_X - 0.036),
+        z: TABLE_MIN_Z + 0.018 + seededUnit(runtime.entity.index + 73, sequence) * (TABLE_MAX_Z - TABLE_MIN_Z - 0.036),
+      };
+      if (!isPlayablePosition(candidate.x, candidate.z)) continue;
+      fallback = candidate;
+      const crowded = [...this.runtimes.values()].some(
+        (other) =>
+          other !== runtime &&
+          other.entity.object3D?.visible &&
+          Math.hypot(
+            other.entity.object3D.position.x - candidate.x,
+            other.entity.object3D.position.z - candidate.z,
+          ) < 0.14,
+      );
+      if (!crowded) return candidate;
+    }
+    return fallback;
   }
 
   private moveToward(
@@ -850,15 +946,19 @@ export class ViewerAvatarSystem extends createSystem({
     });
   }
 
-  private setLabel(runtime: AvatarRuntime, displayName: string): void {
-    if (runtime.label != null && runtime.labelText === displayName) return;
+  private setLabel(runtime: AvatarRuntime, displayName: string, isBot: boolean): void {
+    if (
+      runtime.label != null &&
+      runtime.labelText === displayName &&
+      runtime.labelIsBot === isBot
+    ) return;
     this.removeLabel(runtime);
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 96;
     const context = canvas.getContext('2d');
     if (context == null || runtime.entity.object3D == null) return;
-    context.fillStyle = 'rgba(8, 20, 25, 0.88)';
+    context.fillStyle = isBot ? 'rgba(27, 103, 101, 0.9)' : 'rgba(8, 20, 25, 0.88)';
     context.beginPath();
     context.roundRect(4, 4, 504, 88, 28);
     context.fill();
@@ -881,6 +981,7 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.entity.object3D.add(label);
     runtime.label = label;
     runtime.labelText = displayName;
+    runtime.labelIsBot = isBot;
   }
 
   private removeLabel(runtime: AvatarRuntime): void {
@@ -891,6 +992,7 @@ export class ViewerAvatarSystem extends createSystem({
     label.material.dispose();
     runtime.label = null;
     runtime.labelText = '';
+    runtime.labelIsBot = false;
   }
 
   private showBubble(userId: string, text: string, time: number): void {
@@ -981,18 +1083,408 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.bubbleExpiresAt = 0;
   }
 
+  private showWelcomeNotice(displayName: string, time: number): void {
+    const parent = this.slots[0]?.object3D?.parent;
+    if (parent == null) return;
+    this.removeWelcomeNotice();
+    const canvas = document.createElement('canvas');
+    canvas.width = 768;
+    canvas.height = 180;
+    const context = canvas.getContext('2d');
+    if (context == null) return;
+    context.shadowColor = 'rgba(55, 44, 36, 0.2)';
+    context.shadowBlur = 18;
+    context.fillStyle = 'rgba(255, 249, 240, 0.98)';
+    context.beginPath();
+    context.roundRect(18, 18, 732, 144, 48);
+    context.fill();
+    context.shadowColor = 'transparent';
+    context.strokeStyle = '#E5D5C8';
+    context.lineWidth = 6;
+    context.stroke();
+
+    let fontSize = 56;
+    context.font = `800 ${fontSize}px system-ui, sans-serif`;
+    const prefix = 'Welcome, ';
+    const suffix = '!';
+    let totalWidth = context.measureText(`${prefix}${displayName}${suffix}`).width;
+    if (totalWidth > 680) fontSize = Math.max(38, fontSize * (680 / totalWidth));
+    context.font = `800 ${fontSize}px system-ui, sans-serif`;
+    const prefixWidth = context.measureText(prefix).width;
+    const nameWidth = context.measureText(displayName).width;
+    const suffixWidth = context.measureText(suffix).width;
+    totalWidth = prefixWidth + nameWidth + suffixWidth;
+    let x = (canvas.width - totalWidth) / 2;
+    context.textAlign = 'left';
+    context.textBaseline = 'middle';
+    context.fillStyle = '#2C3434';
+    context.fillText(prefix, x, 90);
+    x += prefixWidth;
+    context.fillStyle = '#C94F78';
+    context.fillText(displayName, x, 90);
+    x += nameWidth;
+    context.fillStyle = '#2C3434';
+    context.fillText(suffix, x, 90);
+
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.minFilter = LinearFilter;
+    const sprite = new Sprite(
+      new SpriteMaterial({ map: texture, transparent: true, depthTest: false, opacity: 0 }),
+    );
+    sprite.name = 'Viewer Join Welcome';
+    sprite.position.set(0, 0.43, -0.08);
+    sprite.scale.set(0.001, 0.001, 1);
+    sprite.renderOrder = 24;
+    parent.add(sprite);
+    this.welcomeNotice = { sprite, shownAt: time, expiresAt: time + 3.6 };
+  }
+
+  private updateWelcomeNotice(time: number): void {
+    const notice = this.welcomeNotice;
+    if (notice == null) return;
+    if (time >= notice.expiresAt) {
+      this.removeWelcomeNotice();
+      return;
+    }
+    const appear = clamp((time - notice.shownAt) / 0.2, 0, 1);
+    const fade = clamp((notice.expiresAt - time) / 0.55, 0, 1);
+    const scale = 0.85 + elasticOut(appear) * 0.15;
+    notice.sprite.scale.set(0.44 * scale, 0.103 * scale, 1);
+    notice.sprite.material.opacity = Math.min(appear, fade);
+  }
+
+  private removeWelcomeNotice(): void {
+    const notice = this.welcomeNotice;
+    if (notice == null) return;
+    notice.sprite.removeFromParent();
+    notice.sprite.material.map?.dispose();
+    notice.sprite.material.dispose();
+    this.welcomeNotice = null;
+  }
+
+  private showReaction(userId: string, reaction: ReactionType, time: number): void {
+    const entity = this.userEntities.get(userId);
+    const runtime = entity == null ? null : this.runtimes.get(entity);
+    const object = entity?.object3D;
+    if (entity == null || runtime == null || object == null || !object.visible) return;
+    while (this.reactionEffects.length >= 12) {
+      const oldest = this.reactionEffects[0];
+      if (oldest != null) this.removeReactionEffect(oldest);
+    }
+    object.updateWorldMatrix(true, false);
+    const height = runtime.monster?.targetHeight ?? 0.14;
+    const origin = object.localToWorld(new Vector3(0.08, height * 0.78 + 0.07, 0));
+    const root = new Group();
+    root.name = `Viewer Reaction — ${reaction}`;
+    root.position.copy(origin);
+    root.scale.setScalar(0.001);
+    const materials: MeshBasicMaterial[] = [];
+    const material = (color: string): MeshBasicMaterial => {
+      const value = new MeshBasicMaterial({ color, transparent: true, depthTest: true });
+      materials.push(value);
+      return value;
+    };
+    const add = (
+      geometry: SphereGeometry | BoxGeometry | ConeGeometry,
+      color: string,
+      position: [number, number, number],
+      scale: [number, number, number],
+      rotationZ = 0,
+    ): void => {
+      const mesh = new Mesh(geometry, material(color));
+      mesh.position.set(...position);
+      mesh.scale.set(...scale);
+      mesh.rotation.z = rotationZ;
+      mesh.renderOrder = 22;
+      root.add(mesh);
+    };
+    if (reaction === 'support') {
+      add(reactionSphereGeometry, '#FF6598', [-0.028, 0.026, 0], [0.07, 0.07, 0.05]);
+      add(reactionSphereGeometry, '#FF6598', [0.028, 0.026, 0], [0.07, 0.07, 0.05]);
+      add(reactionConeGeometry, '#F04F86', [0, -0.035, 0], [0.11, 0.13, 0.08], Math.PI);
+    } else if (reaction === 'like') {
+      add(reactionBoxGeometry, '#FFD36A', [0, 0, 0], [0.1, 0.11, 0.045]);
+      add(reactionBoxGeometry, '#FFE39A', [0.075, 0.055, 0], [0.09, 0.035, 0.045], -0.55);
+      add(reactionBoxGeometry, '#FFD36A', [-0.058, 0.015, 0], [0.035, 0.12, 0.045]);
+    } else {
+      add(reactionConeGeometry, '#FF6B36', [0, 0, 0], [0.12, 0.18, 0.09]);
+      add(reactionConeGeometry, '#FFB52E', [0.025, -0.015, 0.01], [0.075, 0.12, 0.06], -0.18);
+      add(reactionConeGeometry, '#FFF0A0', [-0.018, -0.03, 0.02], [0.038, 0.075, 0.035], 0.15);
+    }
+    const label = this.createReactionLabel(entity.getValue(ViewerAvatar, 'displayName') ?? 'viewer');
+    label.position.set(0, -0.14, 0);
+    root.add(label);
+    this.world.scene.add(root);
+    const angle = (entity.index * 1.73) % (Math.PI * 2);
+    this.reactionEffects.push({
+      root,
+      origin,
+      direction: new Vector3(Math.cos(angle), 0, Math.sin(angle)),
+      startedAt: time,
+      materials,
+      label,
+    });
+  }
+
+  private createReactionLabel(displayName: string): Sprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 96;
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = 'rgba(24, 31, 33, 0.9)';
+    context.beginPath();
+    context.roundRect(8, 8, 496, 80, 28);
+    context.fill();
+    context.fillStyle = '#FFFFFF';
+    context.font = '700 43px system-ui, sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(displayName, 256, 49, 460);
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.minFilter = LinearFilter;
+    const sprite = new Sprite(
+      new SpriteMaterial({ map: texture, transparent: true, depthTest: false }),
+    );
+    sprite.scale.set(0.2, 0.038, 1);
+    sprite.renderOrder = 23;
+    return sprite;
+  }
+
+  private updateReactionEffects(time: number): void {
+    for (const effect of [...this.reactionEffects]) {
+      const elapsed = time - effect.startedAt;
+      if (elapsed >= 3.6) {
+        this.removeReactionEffect(effect);
+        continue;
+      }
+      const appear = clamp(elapsed / 0.22, 0, 1);
+      const fade = elapsed < 2.55 ? 1 : clamp((3.6 - elapsed) / 1.05, 0, 1);
+      const progress = clamp(elapsed / 3.6, 0, 1);
+      effect.root.position.copy(effect.origin).addScaledVector(effect.direction, progress * 0.08);
+      effect.root.position.y += progress * 0.16;
+      effect.root.rotation.y = elapsed * 0.55;
+      effect.root.rotation.z = Math.sin(elapsed * 2.1) * 0.08;
+      effect.root.scale.setScalar((0.86 + elasticOut(appear) * 0.14) * fade);
+      for (const value of effect.materials) value.opacity = fade;
+      effect.label.material.opacity = fade;
+    }
+  }
+
+  private removeReactionEffect(effect: ReactionEffect): void {
+    const index = this.reactionEffects.indexOf(effect);
+    if (index >= 0) this.reactionEffects.splice(index, 1);
+    effect.root.removeFromParent();
+    for (const material of effect.materials) material.dispose();
+    effect.label.material.map?.dispose();
+    effect.label.material.dispose();
+  }
+
+  private createShoutoutCelebration(userId: string, time: number): void {
+    const entity = this.userEntities.get(userId);
+    const runtime = entity == null ? null : this.runtimes.get(entity);
+    const object = entity?.object3D;
+    if (
+      entity == null ||
+      runtime == null ||
+      runtime.labelIsBot ||
+      object == null ||
+      !object.visible ||
+      !this.queries.held.entities.has(entity)
+    ) return;
+    while (this.shoutoutEffects.length >= 5) {
+      const oldest = this.shoutoutEffects[0];
+      if (oldest != null) this.removeShoutoutEffect(oldest);
+    }
+    object.updateWorldMatrix(true, false);
+    const height = runtime.monster?.targetHeight ?? 0.14;
+    const origin = object.localToWorld(new Vector3(0, height * 0.58 + 0.045, 0));
+    const root = new Group();
+    root.name = `Community Shoutout — ${userId}`;
+    root.position.copy(origin);
+    root.quaternion.copy(this.world.player.head.getWorldQuaternion(new Quaternion()));
+    root.scale.setScalar(0.001);
+    const materials: MeshBasicMaterial[] = [];
+    const makeMaterial = (color: string, opacity: number): MeshBasicMaterial => {
+      const material = new MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        depthTest: false,
+      });
+      materials.push(material);
+      return material;
+    };
+
+    const halo = [0, Math.PI / 2].map((rotationY, index) => {
+      const ring = new Mesh(
+        impactRingGeometry,
+        makeMaterial(index === 0 ? '#FFD96A' : '#FFF0AD', 0),
+      );
+      ring.name = 'Shoutout Golden Halo';
+      ring.rotation.y = rotationY;
+      ring.scale.setScalar(0.18);
+      ring.renderOrder = 35;
+      root.add(ring);
+      return ring;
+    });
+    const spotlight = new Mesh(
+      reactionConeGeometry,
+      makeMaterial('#FFE79A', 0),
+    );
+    spotlight.name = 'Shoutout Soft Spotlight';
+    spotlight.position.y = 0.06;
+    spotlight.scale.set(0.19, 0.3, 0.12);
+    spotlight.rotation.z = Math.PI;
+    spotlight.renderOrder = 33;
+    root.add(spotlight);
+
+    const stars = Array.from({ length: 15 }, (_, index) => {
+      const orbit = index >= 10;
+      const star = new Mesh(
+        shoutoutStarGeometry,
+        makeMaterial(index % 3 === 0 ? '#FFF2A8' : '#FFD35A', 0),
+      );
+      star.name = orbit ? 'Shoutout Orbit Star' : 'Shoutout Burst Star';
+      star.userData.shoutoutAngle = (index / (orbit ? 5 : 10)) * Math.PI * 2;
+      star.userData.shoutoutOrbit = orbit;
+      star.userData.shoutoutRadius = 0.14 + (index % 3) * 0.025;
+      star.scale.setScalar(orbit ? 0.032 : 0.038);
+      star.renderOrder = 36;
+      root.add(star);
+      return star;
+    });
+    const displayName = entity.getValue(ViewerAvatar, 'displayName') ?? 'viewer';
+    const label = this.createShoutoutLabel(displayName);
+    label.position.set(0, 0.26, 0);
+    root.add(label);
+    this.world.scene.add(root);
+    this.shoutoutEffects.push({
+      root,
+      entity,
+      origin,
+      startedAt: time,
+      halo,
+      spotlight,
+      stars,
+      materials,
+      label,
+    });
+  }
+
+  private createShoutoutLabel(displayName: string): Sprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 320;
+    const context = canvas.getContext('2d')!;
+    context.shadowColor = 'rgba(85, 53, 8, 0.38)';
+    context.shadowBlur = 22;
+    context.fillStyle = 'rgba(56, 43, 24, 0.84)';
+    context.beginPath();
+    context.roundRect(24, 24, 976, 272, 74);
+    context.fill();
+    context.shadowColor = 'transparent';
+    context.strokeStyle = '#FFD76A';
+    context.lineWidth = 8;
+    context.stroke();
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillStyle = '#FFF9E9';
+    context.font = '800 54px system-ui, sans-serif';
+    context.fillText('Shoutout to', 512, 104);
+    let fontSize = 84;
+    context.font = `900 ${fontSize}px system-ui, sans-serif`;
+    const desiredWidth = context.measureText(`${displayName}!`).width;
+    if (desiredWidth > 900) fontSize = Math.max(48, fontSize * (900 / desiredWidth));
+    context.font = `900 ${fontSize}px system-ui, sans-serif`;
+    context.fillStyle = '#FF789E';
+    context.fillText(`${displayName}!`, 512, 212, 900);
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.minFilter = LinearFilter;
+    const sprite = new Sprite(
+      new SpriteMaterial({ map: texture, transparent: true, depthTest: false, opacity: 0 }),
+    );
+    sprite.name = 'Community Shoutout Text';
+    sprite.scale.set(0.5, 0.156, 1);
+    sprite.renderOrder = 38;
+    return sprite;
+  }
+
+  private updateShoutoutEffects(time: number): void {
+    for (const effect of [...this.shoutoutEffects]) {
+      const elapsed = time - effect.startedAt;
+      if (elapsed >= 3.8) {
+        this.removeShoutoutEffect(effect);
+        continue;
+      }
+      if (
+        effect.entity != null &&
+        effect.entity.object3D?.visible &&
+        this.queries.held.entities.has(effect.entity)
+      ) {
+        const runtime = this.runtimes.get(effect.entity);
+        const height = runtime?.monster?.targetHeight ?? 0.14;
+        effect.entity.object3D.updateWorldMatrix(true, false);
+        effect.entity.object3D.localToWorld(effect.origin.set(0, height * 0.58 + 0.045, 0));
+      } else {
+        effect.entity = null;
+      }
+      effect.root.position.copy(effect.origin);
+      const appear = clamp(elapsed / 0.28, 0, 1);
+      const burst = elasticOut(clamp(elapsed / 0.46, 0, 1));
+      const fade = elapsed < 2.7 ? 1 : clamp((3.8 - elapsed) / 1.1, 0, 1);
+      effect.root.scale.setScalar((0.84 + 0.16 * elasticOut(appear)) * fade);
+      effect.halo.forEach((ring, index) => {
+        ring.scale.setScalar(0.16 + burst * (0.17 + index * 0.035));
+        ring.rotation.z = elapsed * (index === 0 ? 0.42 : -0.34);
+        (ring.material as MeshBasicMaterial).opacity = fade * (index === 0 ? 0.62 : 0.38);
+      });
+      (effect.spotlight.material as MeshBasicMaterial).opacity = fade * 0.14;
+      effect.stars.forEach((star, index) => {
+        const angle = (star.userData.shoutoutAngle as number) +
+          ((star.userData.shoutoutOrbit as boolean) ? elapsed * 0.7 : 0);
+        const orbit = star.userData.shoutoutOrbit as boolean;
+        const radius = orbit
+          ? (star.userData.shoutoutRadius as number)
+          : burst * (star.userData.shoutoutRadius as number);
+        star.position.set(
+          Math.cos(angle) * radius,
+          Math.sin(angle) * radius * 0.72 + (orbit ? elapsed * 0.018 : 0),
+          orbit ? Math.sin(angle * 1.7) * 0.035 : (index % 2 === 0 ? 0.018 : -0.018),
+        );
+        star.rotation.x = elapsed * (1.1 + index * 0.04);
+        star.rotation.y = elapsed * (0.9 + index * 0.03);
+        (star.material as MeshBasicMaterial).opacity = fade;
+      });
+      effect.label.material.opacity = Math.min(appear, fade);
+      const labelScale = 0.9 + 0.1 * elasticOut(appear);
+      effect.label.scale.set(0.5 * labelScale, 0.156 * labelScale, 1);
+    }
+  }
+
+  private removeShoutoutEffect(effect: ShoutoutEffect): void {
+    const index = this.shoutoutEffects.indexOf(effect);
+    if (index >= 0) this.shoutoutEffects.splice(index, 1);
+    effect.root.removeFromParent();
+    for (const material of effect.materials) material.dispose();
+    effect.label.material.map?.dispose();
+    effect.label.material.dispose();
+  }
+
   private createCommunityPanels(): void {
     const parent = this.slots[0]?.object3D?.parent;
     if (parent == null) return;
 
     this.leaderboardCanvas = document.createElement('canvas');
-    this.leaderboardCanvas.width = 768;
-    this.leaderboardCanvas.height = 720;
+    this.leaderboardCanvas.width = 640;
+    this.leaderboardCanvas.height = 900;
     this.leaderboardPanel = this.createWorldPanel(
       this.leaderboardCanvas,
       'Top Active Community Members',
-      new Vector3(0.63, 0.29, 0.43),
-      new Vector3(0.39, 0.365, 1),
+      new Vector3(0.61, 0.32, -0.37),
+      new Vector3(0.31, 0.435, 1),
     );
     parent.add(this.leaderboardPanel);
 
@@ -1002,7 +1494,7 @@ export class ViewerAvatarSystem extends createSystem({
     this.bannerPanel = this.createWorldPanel(
       this.bannerCanvas,
       'Streamer World Banner',
-      new Vector3(0, 0.34, -0.55),
+      new Vector3(0, 0.6, -0.55),
       new Vector3(0.7, 0.175, 1),
     );
     parent.add(this.bannerPanel);
@@ -1041,55 +1533,73 @@ export class ViewerAvatarSystem extends createSystem({
     const context = canvas?.getContext('2d');
     if (canvas == null || panel == null || context == null) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
-    context.shadowColor = 'rgba(116, 67, 190, 0.25)';
-    context.shadowBlur = 28;
-    context.fillStyle = 'rgba(249, 246, 255, 0.96)';
+    context.shadowColor = 'rgba(91, 49, 18, 0.18)';
+    context.shadowBlur = 24;
+    context.fillStyle = 'rgba(255, 249, 242, 0.98)';
     context.beginPath();
-    context.roundRect(28, 28, 712, 664, 56);
+    context.roundRect(24, 24, 592, 852, 52);
     context.fill();
     context.shadowColor = 'transparent';
-    context.strokeStyle = '#D7B9FF';
-    context.lineWidth = 8;
+    context.strokeStyle = '#EAD6C1';
+    context.lineWidth = 7;
     context.stroke();
 
+    // Lightweight trophy mark drawn directly into the existing canvas texture.
+    context.fillStyle = '#F4B56A';
+    context.beginPath();
+    context.roundRect(281, 62, 78, 66, 18);
+    context.fill();
+    context.strokeStyle = '#B85C18';
+    context.lineWidth = 8;
+    context.stroke();
+    context.beginPath();
+    context.arc(279, 91, 25, Math.PI * 0.5, Math.PI * 1.5);
+    context.arc(361, 91, 25, -Math.PI * 0.5, Math.PI * 0.5);
+    context.stroke();
+    context.fillStyle = '#B85C18';
+    context.fillRect(312, 126, 16, 25);
+    context.beginPath();
+    context.roundRect(287, 148, 66, 15, 7);
+    context.fill();
+
     context.textAlign = 'center';
-    context.fillStyle = '#4C3C66';
-    context.font = '700 34px system-ui, sans-serif';
-    context.fillText('TOP ACTIVE', 384, 105);
-    context.fillStyle = '#D72D92';
-    context.font = '900 58px system-ui, sans-serif';
-    context.fillText('COMMUNITY', 384, 165);
-    context.fillStyle = '#4C3C66';
+    context.fillStyle = '#38271C';
     context.font = '700 31px system-ui, sans-serif';
-    context.fillText('MEMBERS', 384, 208);
+    context.fillText('TOP ACTIVE', 320, 212);
+    context.fillStyle = '#B85C18';
+    context.font = '900 54px system-ui, sans-serif';
+    context.fillText('COMMUNITY', 320, 269);
+    context.fillStyle = '#38271C';
+    context.font = '700 30px system-ui, sans-serif';
+    context.fillText('MEMBERS', 320, 310);
 
     if (this.communityEntries.length === 0) {
-      context.fillStyle = '#8B7D9F';
-      context.font = '600 34px system-ui, sans-serif';
-      context.fillText('Waiting for the community…', 384, 410);
+      context.fillStyle = '#8B6D58';
+      context.font = '600 31px system-ui, sans-serif';
+      context.fillText('Waiting for the community…', 320, 560, 500);
     } else {
       this.communityEntries.slice(0, 3).forEach((entry, index) => {
-        const y = 252 + index * 137;
-        context.fillStyle = index === 0 ? '#FCE3F4' : '#F0EAFE';
+        const y = 350 + index * 158;
+        context.fillStyle = index === 0 ? '#FCE4C4' : '#FFF1DF';
         context.beginPath();
-        context.roundRect(72, y, 624, 108, 32);
+        context.roundRect(index === 0 ? 53 : 65, y, index === 0 ? 534 : 510, index === 0 ? 126 : 112, 30);
         context.fill();
         if (index === 0) {
-          context.strokeStyle = '#F05BB0';
+          context.strokeStyle = '#B85C18';
           context.lineWidth = 5;
           context.stroke();
         }
         context.textAlign = 'left';
-        context.fillStyle = index === 0 ? '#D72D92' : '#73589A';
-        context.font = '800 42px system-ui, sans-serif';
-        context.fillText(`${index + 1}`, 101, y + 68);
-        context.fillStyle = '#342A45';
-        context.font = '700 37px system-ui, sans-serif';
-        context.fillText(entry.displayName, 168, y + 66, 365);
+        context.fillStyle = '#B85C18';
+        context.font = '800 39px system-ui, sans-serif';
+        context.fillText(`${index + 1}`, 88, y + (index === 0 ? 78 : 70));
+        context.fillStyle = '#38271C';
+        context.font = `${index === 0 ? 800 : 700} ${index === 0 ? 37 : 34}px system-ui, sans-serif`;
+        context.fillText(entry.displayName, 145, y + (index === 0 ? 76 : 68), 310);
         context.textAlign = 'right';
-        context.fillStyle = '#A72A98';
-        context.font = '800 36px system-ui, sans-serif';
-        context.fillText(String(entry.score), 654, y + 66);
+        context.fillStyle = '#B85C18';
+        context.font = '800 35px system-ui, sans-serif';
+        context.fillText(String(entry.score), 545, y + (index === 0 ? 76 : 68));
       });
     }
     if (panel.material.map != null) panel.material.map.needsUpdate = true;
@@ -1101,36 +1611,40 @@ export class ViewerAvatarSystem extends createSystem({
     const context = canvas?.getContext('2d');
     if (canvas == null || panel == null || context == null) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
-    context.shadowColor = 'rgba(243, 60, 175, 0.48)';
-    context.shadowBlur = 25;
-    context.fillStyle = 'rgba(44, 25, 66, 0.94)';
+    context.shadowColor = 'rgba(70, 52, 40, 0.22)';
+    context.shadowBlur = 16;
+    context.fillStyle = 'rgba(255, 249, 240, 0.98)';
     context.beginPath();
     context.roundRect(18, 18, 988, 220, 62);
     context.fill();
     context.shadowColor = 'transparent';
-    context.strokeStyle = '#C969FF';
+    context.strokeStyle = '#D7C7B8';
     context.lineWidth = 6;
     context.stroke();
 
     const username = this.broadcasterLogin ?? 'streamer';
-    context.font = '800 53px system-ui, sans-serif';
-    const prefix = 'Hang Out in ';
+    const prefix = 'Hang Out in';
     const suffix = "'s World!";
-    const widths = [prefix, username, suffix].map((part) => context.measureText(part).width);
-    let x = (canvas.width - widths.reduce((sum, width) => sum + width, 0)) / 2;
-    context.textAlign = 'left';
-    context.fillStyle = '#FFFFFF';
-    context.fillText(prefix, x, 112);
-    x += widths[0];
-    context.fillStyle = '#FF5BC8';
-    context.fillText(username, x, 112);
-    x += widths[1];
-    context.fillStyle = '#FFFFFF';
-    context.fillText(suffix, x, 112);
     context.textAlign = 'center';
-    context.fillStyle = '#E6C7FF';
-    context.font = '700 31px system-ui, sans-serif';
-    context.fillText('CHAT • PLAY • HANG OUT', 512, 176);
+    context.fillStyle = '#2C3434';
+    context.font = '900 66px system-ui, sans-serif';
+    context.fillText(prefix, 512, 104);
+
+    let secondLineSize = 66;
+    context.font = `900 ${secondLineSize}px system-ui, sans-serif`;
+    const desiredWidth = context.measureText(`${username}${suffix}`).width;
+    if (desiredWidth > 900) secondLineSize = Math.max(44, secondLineSize * (900 / desiredWidth));
+    context.font = `900 ${secondLineSize}px system-ui, sans-serif`;
+    const usernameWidth = context.measureText(username).width;
+    const suffixWidth = context.measureText(suffix).width;
+    let x = (canvas.width - usernameWidth - suffixWidth) / 2;
+    context.textAlign = 'left';
+    context.fillStyle = '#C94F78';
+    context.fillText(username, x, 183);
+    x += usernameWidth;
+    context.fillStyle = '#2C3434';
+    context.fillText(suffix, x, 183);
+    context.textAlign = 'center';
     if (panel.material.map != null) panel.material.map.needsUpdate = true;
   }
 

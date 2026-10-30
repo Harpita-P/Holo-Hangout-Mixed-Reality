@@ -49,25 +49,6 @@
       },
       "children": [
         {
-          "id": "chatirl-grab-cube",
-          "name": "ChatIRL Grab Cube",
-          "content": {
-            "type": "asset",
-            "asset": "chatirl-cube",
-            "castShadow": true,
-            "receiveShadow": true
-          },
-          "transform": {
-            "position": [0, 0.055, 0]
-          },
-          "components": {
-            "OneHandGrabbable": {
-              "translate": true,
-              "rotate": true
-            }
-          }
-        },
-        {
           "id": "chatirl-paintball-blaster",
           "name": "ChatIRL Paintball Blaster",
           "content": { "type": "asset", "asset": "chatirl-paintball-blaster", "castShadow": true },
@@ -157,6 +138,76 @@
               "transform": { "position": [-0.15, 0.003, 0.07], "rotationDeg": [0, 38, 0], "scale": [0.026, 0.026, 0.026] }
             }
           ]
+        },
+        {
+          "id": "terrain-island-north-far",
+          "name": "North Far Floating Terrain Island",
+          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true, "receiveShadow": true },
+          "transform": { "position": [-0.62, 0.27, -0.88], "rotationDeg": [0, -14, 0], "scale": [0.62, 0.62, 0.62] },
+          "components": { "FloatingTerrain": { "amplitude": 0.011, "speed": 0.76, "phase": 1.35 } },
+          "children": [
+            {
+              "id": "island-north-far-tree",
+              "name": "North Far Island Tree",
+              "content": { "type": "asset", "asset": "environment-tree-blob-1", "castShadow": true },
+              "transform": { "position": [-0.045, 0.004, -0.015], "rotationDeg": [0, 22, 0], "scale": [0.034, 0.034, 0.034] }
+            },
+            {
+              "id": "island-north-far-bush",
+              "name": "North Far Island Bush",
+              "content": { "type": "asset", "asset": "environment-bush-1", "castShadow": true },
+              "transform": { "position": [0.12, 0.006, 0.045], "rotationDeg": [0, -20, 0], "scale": [0.03, 0.03, 0.03] }
+            }
+          ]
+        },
+        {
+          "id": "terrain-island-southeast-far",
+          "name": "Southeast Far Floating Terrain Island",
+          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true, "receiveShadow": true },
+          "transform": { "position": [0.92, 0.22, 0.68], "rotationDeg": [0, 31, 0], "scale": [0.57, 0.57, 0.57] },
+          "components": { "FloatingTerrain": { "amplitude": 0.013, "speed": 0.69, "phase": 3.25 } },
+          "children": [
+            {
+              "id": "island-southeast-far-rock",
+              "name": "Southeast Far Island Rock",
+              "content": { "type": "asset", "asset": "environment-rock-2", "castShadow": true },
+              "transform": { "position": [-0.08, 0.006, 0.015], "rotationDeg": [0, 17, 0], "scale": [0.021, 0.021, 0.021] }
+            },
+            {
+              "id": "island-southeast-far-plant",
+              "name": "Southeast Far Island Plant",
+              "content": { "type": "asset", "asset": "environment-plant-1", "castShadow": true },
+              "transform": { "position": [0.1, 0.004, -0.025], "rotationDeg": [0, -14, 0], "scale": [0.028, 0.028, 0.028] }
+            }
+          ]
+        },
+        {
+          "id": "terrain-fragment-west-high",
+          "name": "West High Floating Fragment",
+          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true },
+          "transform": { "position": [-1.32, 0.35, 0.34], "rotationDeg": [0, 51, 0], "scale": [0.23, 0.23, 0.23] },
+          "components": { "FloatingTerrain": { "amplitude": 0.008, "speed": 0.93, "phase": 0.8 } }
+        },
+        {
+          "id": "terrain-fragment-east-high",
+          "name": "East High Floating Fragment",
+          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true },
+          "transform": { "position": [1.34, 0.31, -0.42], "rotationDeg": [0, -37, 0], "scale": [0.2, 0.2, 0.2] },
+          "components": { "FloatingTerrain": { "amplitude": 0.007, "speed": 1.02, "phase": 2.7 } }
+        },
+        {
+          "id": "terrain-fragment-south-low",
+          "name": "South Low Floating Fragment",
+          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true },
+          "transform": { "position": [-0.42, 0.08, 1.02], "rotationDeg": [0, 9, 0], "scale": [0.27, 0.27, 0.27] },
+          "components": { "FloatingTerrain": { "amplitude": 0.009, "speed": 0.81, "phase": 4.6 } }
+        },
+        {
+          "id": "terrain-fragment-north-tiny",
+          "name": "North Tiny Floating Fragment",
+          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true },
+          "transform": { "position": [0.52, 0.38, -1.01], "rotationDeg": [0, 74, 0], "scale": [0.17, 0.17, 0.17] },
+          "components": { "FloatingTerrain": { "amplitude": 0.006, "speed": 1.08, "phase": 5.4 } }
         },
         {
           "id": "env-grass-center-west",

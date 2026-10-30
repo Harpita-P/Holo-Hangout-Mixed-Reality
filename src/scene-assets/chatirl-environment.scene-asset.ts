@@ -1,4 +1,5 @@
 import {
+  CylinderGeometry,
   ExtrudeGeometry,
   Group,
   Mesh,
@@ -38,6 +39,12 @@ const deepGrass = new MeshStandardMaterial({
   color: '#2D783D',
   roughness: 0.9,
   metalness: 0,
+});
+const floatingStone = new MeshStandardMaterial({
+  color: '#6D5946',
+  roughness: 0.96,
+  metalness: 0,
+  flatShading: true,
 });
 
 function terrainOutline(): Shape {
@@ -164,6 +171,16 @@ export function createOrganicTabletop(): Object3D {
 export function createFloatingTerrainIsland(): Object3D {
   const root = new Group();
   root.name = 'ChatIRL Floating Terrain Island';
-  root.add(terrainChunk(islandOutline(), 0.045, 'Floating Organic Island'));
+  const underside = new Mesh(
+    new CylinderGeometry(0.2, 0.045, 0.22, 7, 2, false),
+    floatingStone,
+  );
+  underside.name = 'Tapered Stone Underside';
+  underside.position.set(0.005, -0.145, 0.006);
+  underside.scale.set(1.18, 1, 0.83);
+  underside.rotation.y = 0.18;
+  underside.castShadow = true;
+  underside.receiveShadow = true;
+  root.add(terrainChunk(islandOutline(), 0.045, 'Floating Organic Island'), underside);
   return root;
 }

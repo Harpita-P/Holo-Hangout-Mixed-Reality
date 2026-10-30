@@ -3,6 +3,7 @@ import {
   type ParticipantSnapshot,
   type CommunityLeaderboardEntry,
   type ServerMessage,
+  type ReactionType,
 } from '../shared/protocol.js';
 import {
   commandForMonster,
@@ -22,7 +23,36 @@ export interface ChatMessage {
 interface ManagedParticipant extends ParticipantSnapshot {
   actionTimer: NodeJS.Timeout | null;
   leaveTimer: NodeJS.Timeout | null;
+  botTimer: NodeJS.Timeout | null;
 }
+
+export interface DemoStatus {
+  enabled: boolean;
+  botCount: number;
+  realParticipantCount: number;
+  totalCount: number;
+  capacity: number;
+}
+
+const BOT_ID_PREFIX = 'demo-bot:';
+const DEMO_BOTS = [
+  'mochibot',
+  'pixelbot',
+  'bobabot',
+  'novabot',
+  'poppybot',
+  'ziggybot',
+] as const;
+const BOT_COMMANDS = {
+  blob: ['!dance', '!jump', '!bite'],
+  big: ['!wave', '!jump', '!run', '!duck'],
+  flying: ['!fly', '!headbutt', '!punch'],
+} as const;
+const UNIVERSAL_REACTIONS: Readonly<Record<string, ReactionType>> = {
+  '!support': 'support',
+  '!like': 'like',
+  '!fire': 'fire',
+};
 
 export interface ParticipantManagerOptions {
   maxParticipants?: number;
@@ -31,6 +61,7 @@ export interface ParticipantManagerOptions {
   scoreCooldownMs?: number;
   leaveDeadlineMs?: number;
   emit: (message: ServerMessage) => void;
+  onRealViewerJoined?: (participant: ParticipantSnapshot) => void;
 }
 
 export class ParticipantManager {
@@ -40,12 +71,14 @@ export class ParticipantManager {
   private readonly lastMonsterByUser = new Map<string, MonsterType>();
   private readonly scores = new Map<string, number>();
   private readonly scoreCooldowns = new Map<string, number>();
+  private readonly reactionCooldowns = new Map<string, number>();
   private readonly maxParticipants: number;
   private readonly actionCooldownMs: number;
   private readonly chatCooldownMs: number;
   private readonly scoreCooldownMs: number;
   private readonly leaveDeadlineMs: number;
   private acceptingJoins = true;
+  private demoEnabled = false;
 
   constructor(private readonly options: ParticipantManagerOptions) {
     this.maxParticipants = options.maxParticipants ?? 10;
@@ -58,8 +91,9 @@ export class ParticipantManager {
   snapshot(): ParticipantSnapshot[] {
     return [...this.participants.values()]
       .sort((left, right) => left.slot - right.slot)
-      .map(({ actionTimer: _actionTimer, leaveTimer: _leaveTimer, ...value }) =>
-        value,
+      .map(
+        ({ actionTimer: _actionTimer, leaveTimer: _leaveTimer, botTimer: _botTimer, ...value }) =>
+          value,
       );
   }
 
@@ -73,7 +107,7 @@ export class ParticipantManager {
 
   leaderboardMessage(): Extract<ServerMessage, { type: 'community.leaderboard' }> {
     const entries: CommunityLeaderboardEntry[] = [...this.participants.values()]
-      .filter(({ behavior }) => behavior !== AvatarBehaviors.Leaving)
+      .filter(({ behavior, isBot }) => !isBot && behavior !== AvatarBehaviors.Leaving)
       .map(({ userId, displayName, slot }) => ({
         userId,
         displayName,
@@ -87,6 +121,7 @@ export class ParticipantManager {
   }
 
   handleChat(message: ChatMessage): boolean {
+    if (message.userId.startsWith(BOT_ID_PREFIX)) return false;
     const text = message.text.trim();
     if (!text) return false;
     const command = text.split(/\s+/u)[0]?.toLowerCase();
@@ -98,13 +133,19 @@ export class ParticipantManager {
     }
     const participant = this.participants.get(message.userId);
     if (text.startsWith('!')) {
+      const reaction = command == null ? undefined : UNIVERSAL_REACTIONS[command];
+      if (reaction != null) return this.react(message.userId, reaction);
       const action =
         participant == null
           ? null
           : commandForMonster(participant.monsterType, command);
       return action == null ? false : this.act(message.userId, action);
     }
-    if (participant == null || participant.behavior === AvatarBehaviors.Leaving) {
+    if (
+      participant == null ||
+      participant.isBot ||
+      participant.behavior === AvatarBehaviors.Leaving
+    ) {
       return false;
     }
     const now = Date.now();
@@ -123,6 +164,7 @@ export class ParticipantManager {
   }
 
   clear(): void {
+    this.demoEnabled = false;
     for (const participant of this.participants.values()) {
       this.clearTimers(participant);
       this.options.emit({
@@ -137,7 +179,32 @@ export class ParticipantManager {
     this.chatCooldowns.clear();
     this.scores.clear();
     this.scoreCooldowns.clear();
+    this.reactionCooldowns.clear();
     this.options.emit(this.leaderboardMessage());
+  }
+
+  setDemoMode(enabled: boolean): DemoStatus {
+    this.demoEnabled = enabled;
+    if (enabled) {
+      this.reconcileBots();
+    } else {
+      for (const participant of [...this.participants.values()]) {
+        if (participant.isBot) this.removeBot(participant);
+      }
+    }
+    return this.demoStatus();
+  }
+
+  demoStatus(): DemoStatus {
+    const values = [...this.participants.values()];
+    const botCount = values.filter(({ isBot }) => isBot).length;
+    return {
+      enabled: this.demoEnabled,
+      botCount,
+      realParticipantCount: values.length - botCount,
+      totalCount: values.length,
+      capacity: this.maxParticipants,
+    };
   }
 
   private join(userId: string, displayName: string): boolean {
@@ -151,7 +218,14 @@ export class ParticipantManager {
     if (!this.acceptingJoins) {
       return false;
     }
-    const slot = this.nextOpenSlot();
+    let slot = this.nextOpenSlot();
+    if (slot < 0) {
+      const bot = [...this.participants.values()].find(({ isBot }) => isBot);
+      if (bot != null) {
+        slot = bot.slot;
+        this.removeBot(bot);
+      }
+    }
     if (slot < 0) {
       return false;
     }
@@ -161,6 +235,7 @@ export class ParticipantManager {
     this.lastMonsterByUser.set(userId, monster.type);
     const participant: ManagedParticipant = {
       userId,
+      isBot: false,
       displayName: sanitizeDisplayName(displayName),
       colorHex: colorForUser(userId),
       slot,
@@ -174,11 +249,19 @@ export class ParticipantManager {
       targetZ: 0,
       actionTimer: null,
       leaveTimer: null,
+      botTimer: null,
     };
     this.participants.set(userId, participant);
     this.scores.set(userId, 0);
     this.options.emit({ type: 'avatar.join', participant: this.public(participant) });
+    this.options.emit({
+      type: 'viewer.welcome',
+      userId: participant.userId,
+      displayName: participant.displayName,
+    });
+    this.options.onRealViewerJoined?.(this.public(participant));
     this.options.emit(this.leaderboardMessage());
+    this.reconcileBots();
     return true;
   }
 
@@ -255,7 +338,9 @@ export class ParticipantManager {
       this.chatCooldowns.delete(userId);
       this.scores.delete(userId);
       this.scoreCooldowns.delete(userId);
+      this.reactionCooldowns.delete(userId);
       this.options.emit({ type: 'avatar.removed', userId });
+      this.reconcileBots();
     }, this.leaveDeadlineMs);
     participant.leaveTimer.unref();
     return true;
@@ -271,9 +356,29 @@ export class ParticipantManager {
     return -1;
   }
 
+  private react(userId: string, reaction: ReactionType): boolean {
+    const participant = this.participants.get(userId);
+    if (
+      participant == null ||
+      participant.isBot ||
+      participant.behavior === AvatarBehaviors.Leaving
+    ) return false;
+    const now = Date.now();
+    if ((this.reactionCooldowns.get(userId) ?? 0) > now) return false;
+    this.reactionCooldowns.set(userId, now + 5000);
+    this.options.emit({ type: 'avatar.reaction', userId, reaction });
+    this.scores.set(userId, (this.scores.get(userId) ?? 0) + 2);
+    this.options.emit(this.leaderboardMessage());
+    return true;
+  }
+
   private awardScore(userId: string, points: number, now: number): void {
     const participant = this.participants.get(userId);
-    if (participant == null || participant.behavior === AvatarBehaviors.Leaving) return;
+    if (
+      participant == null ||
+      participant.isBot ||
+      participant.behavior === AvatarBehaviors.Leaving
+    ) return;
     if ((this.scoreCooldowns.get(userId) ?? 0) > now) return;
     this.scoreCooldowns.set(userId, now + this.scoreCooldownMs);
     this.scores.set(userId, (this.scores.get(userId) ?? 0) + points);
@@ -281,14 +386,96 @@ export class ParticipantManager {
   }
 
   private public(participant: ManagedParticipant): ParticipantSnapshot {
-    const { actionTimer: _actionTimer, leaveTimer: _leaveTimer, ...value } =
-      participant;
+    const {
+      actionTimer: _actionTimer,
+      leaveTimer: _leaveTimer,
+      botTimer: _botTimer,
+      ...value
+    } = participant;
     return value;
   }
 
   private clearTimers(participant: ManagedParticipant): void {
     if (participant.actionTimer != null) clearTimeout(participant.actionTimer);
     if (participant.leaveTimer != null) clearTimeout(participant.leaveTimer);
+    if (participant.botTimer != null) clearTimeout(participant.botTimer);
+  }
+
+  private reconcileBots(): void {
+    if (!this.demoEnabled) return;
+    const participants = [...this.participants.values()];
+    const realCount = participants.filter(({ isBot }) => !isBot).length;
+    const desiredBotCount = Math.min(DEMO_BOTS.length, this.maxParticipants - realCount);
+    const bots = participants
+      .filter(({ isBot }) => isBot)
+      .sort((left, right) => right.userId.localeCompare(left.userId));
+    while (bots.length > desiredBotCount) {
+      const bot = bots.shift();
+      if (bot != null) this.removeBot(bot);
+    }
+    const activeIds = new Set(
+      [...this.participants.values()].filter(({ isBot }) => isBot).map(({ userId }) => userId),
+    );
+    for (let index = 0; index < DEMO_BOTS.length; index += 1) {
+      if (activeIds.size >= desiredBotCount) break;
+      const userId = `${BOT_ID_PREFIX}${index}`;
+      if (activeIds.has(userId)) continue;
+      const slot = this.nextOpenSlot();
+      if (slot < 0) break;
+      this.addBot(index, slot);
+      activeIds.add(userId);
+    }
+  }
+
+  private addBot(index: number, slot: number): void {
+    const monster = monsterForSlot(index);
+    const participant: ManagedParticipant = {
+      userId: `${BOT_ID_PREFIX}${index}`,
+      isBot: true,
+      displayName: DEMO_BOTS[index],
+      colorHex: '#43A7A2',
+      slot,
+      monsterType: monster.type,
+      monsterCategory: monster.category,
+      monsterName: monster.name,
+      supportedCommands: [],
+      behavior: AvatarBehaviors.Idle,
+      actionSequence: 0,
+      targetX: 0,
+      targetZ: 0,
+      actionTimer: null,
+      leaveTimer: null,
+      botTimer: null,
+    };
+    this.participants.set(participant.userId, participant);
+    this.options.emit({ type: 'avatar.join', participant: this.public(participant) });
+    this.scheduleBotAction(participant, 4500 + index * 850);
+  }
+
+  private removeBot(participant: ManagedParticipant): void {
+    if (!participant.isBot) return;
+    this.clearTimers(participant);
+    this.participants.delete(participant.userId);
+    this.cooldowns.delete(participant.userId);
+    this.options.emit({ type: 'avatar.leave', userId: participant.userId, deadlineMs: 0 });
+    this.options.emit({ type: 'avatar.removed', userId: participant.userId });
+  }
+
+  private scheduleBotAction(participant: ManagedParticipant, delayMs?: number): void {
+    if (!participant.isBot || !this.demoEnabled) return;
+    const index = Number.parseInt(participant.userId.slice(BOT_ID_PREFIX.length), 10) || 0;
+    const delay = delayMs ?? 7000 + ((index * 1543 + participant.actionSequence * 977) % 6000);
+    participant.botTimer = setTimeout(() => {
+      participant.botTimer = null;
+      const current = this.participants.get(participant.userId);
+      if (current == null || !current.isBot || !this.demoEnabled) return;
+      const commands = BOT_COMMANDS[current.monsterCategory];
+      const command = commands[(current.actionSequence + index) % commands.length];
+      const action = commandForMonster(current.monsterType, command);
+      if (action != null) this.act(current.userId, action);
+      this.scheduleBotAction(current);
+    }, delay);
+    participant.botTimer.unref();
   }
 }
 

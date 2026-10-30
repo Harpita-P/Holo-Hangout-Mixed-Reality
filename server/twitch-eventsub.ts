@@ -52,6 +52,8 @@ export class TwitchEventSub {
   private refreshTimer: NodeJS.Timeout | null = null;
   private validationTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private outboundTimer: NodeJS.Timeout | null = null;
+  private readonly outboundMessages: string[] = [];
   private readonly seenMessageIds = new Set<string>();
   private stopped = false;
   private lastError: string | null = null;
@@ -69,7 +71,7 @@ export class TwitchEventSub {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', this.config.clientId);
     url.searchParams.set('redirect_uri', this.config.redirectUri);
-    url.searchParams.set('scope', 'user:read:chat');
+    url.searchParams.set('scope', 'user:read:chat user:write:chat');
     url.searchParams.set('state', state);
     return url.toString();
   }
@@ -145,6 +147,15 @@ export class TwitchEventSub {
     this.clearTimers();
     this.socket?.close(1000, 'ChatIRL server stopped');
     this.socket = null;
+    this.outboundMessages.length = 0;
+  }
+
+  sendChatMessage(message: string): void {
+    const normalized = message.replace(/\s+/gu, ' ').trim().slice(0, 500);
+    if (!normalized || this.token == null) return;
+    if (this.outboundMessages.length >= 20) this.outboundMessages.shift();
+    this.outboundMessages.push(normalized);
+    this.drainOutboundMessages();
   }
 
   private connect(url: string, transferred: boolean, previous?: WebSocket): void {
@@ -268,8 +279,10 @@ export class TwitchEventSub {
     if (validation.client_id !== this.config.clientId) {
       throw new Error('Twitch token belongs to a different client ID');
     }
-    if (!validation.scopes.includes('user:read:chat')) {
-      throw new Error('Twitch token is missing user:read:chat');
+    for (const scope of ['user:read:chat', 'user:write:chat']) {
+      if (!validation.scopes.includes(scope)) {
+        throw new Error(`Twitch token is missing ${scope}; reauthorize ChatIRL.`);
+      }
     }
     return validation;
   }
@@ -368,15 +381,52 @@ export class TwitchEventSub {
     this.onStatus({ connected: false, broadcasterLogin: this.token?.login ?? null, error: message });
   }
 
+  private drainOutboundMessages(): void {
+    if (this.outboundTimer != null || this.token == null) return;
+    const message = this.outboundMessages.shift();
+    if (message == null) return;
+    void this.deliverChatMessage(message).finally(() => {
+      this.outboundTimer = setTimeout(() => {
+        this.outboundTimer = null;
+        this.drainOutboundMessages();
+      }, 1100);
+      this.outboundTimer.unref();
+    });
+  }
+
+  private async deliverChatMessage(message: string): Promise<void> {
+    const token = this.token;
+    if (token == null) return;
+    const response = await fetch('https://api.twitch.tv/helix/chat/messages', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token.accessToken}`,
+        'Client-Id': this.config.clientId,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        broadcaster_id: token.userId,
+        sender_id: token.userId,
+        message,
+      }),
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      console.error(`Twitch welcome message failed (${response.status}): ${detail}`);
+    }
+  }
+
   private clearTimers(): void {
     for (const timer of [
       this.keepaliveTimer,
       this.refreshTimer,
       this.validationTimer,
       this.reconnectTimer,
+      this.outboundTimer,
     ]) {
       if (timer != null) clearTimeout(timer);
     }
-    this.keepaliveTimer = this.refreshTimer = this.validationTimer = this.reconnectTimer = null;
+    this.keepaliveTimer = this.refreshTimer = this.validationTimer = this.reconnectTimer =
+      this.outboundTimer = null;
   }
 }

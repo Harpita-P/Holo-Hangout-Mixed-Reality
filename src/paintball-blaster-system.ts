@@ -39,6 +39,12 @@ interface PaintballProjectile {
   direction: Vector3;
 }
 
+interface HitPopup {
+  sprite: Sprite;
+  origin: Vector3;
+  startedAt: number;
+}
+
 export class PaintballBlasterSystem extends createSystem({
   blasters: { required: [PaintballBlaster] },
   heldBlasters: { required: [PaintballBlaster, Grabbed] },
@@ -54,10 +60,10 @@ export class PaintballBlasterSystem extends createSystem({
   private roundStartedAt = 0;
   private roundHits = 0;
   private renderedSecond = -1;
-  private hitPopUntil = 0;
   private hud: Sprite | null = null;
   private hudCanvas: HTMLCanvasElement | null = null;
-  private hitPop: Sprite | null = null;
+  private hitPopupTexture: CanvasTexture | null = null;
+  private readonly hitPopups: HitPopup[] = [];
   private readonly onSelect = (): void => this.fire();
   private readonly onSessionStart = (): void => this.bindSession();
 
@@ -87,6 +93,7 @@ export class PaintballBlasterSystem extends createSystem({
     }
     this.updateProjectiles(Math.min(delta, 1 / 15), time);
     this.updateHud(time);
+    this.updateHitPopups(time);
   }
 
   private bindSession(): void {
@@ -170,18 +177,16 @@ export class PaintballBlasterSystem extends createSystem({
     blaster.setValue(PaintballBlaster, 'hits', (blaster.getValue(PaintballBlaster, 'hits') ?? 0) + 1);
     if (this.roundActive) {
       this.roundHits += 1;
-      this.hitPopUntil = time + 0.55;
       this.renderHud();
     }
+    this.createHitPopup(target, time);
     this.hitCooldowns.set(target.index, time + HIT_COOLDOWN_SECONDS);
   }
 
   private createHud(): void {
-    const parent = this.queries.blasters.entities.values().next().value?.object3D?.parent;
-    if (parent == null) return;
     this.hudCanvas = document.createElement('canvas');
     this.hudCanvas.width = 768;
-    this.hudCanvas.height = 420;
+    this.hudCanvas.height = 320;
     const texture = new CanvasTexture(this.hudCanvas);
     texture.colorSpace = SRGBColorSpace;
     texture.minFilter = LinearFilter;
@@ -189,11 +194,11 @@ export class PaintballBlasterSystem extends createSystem({
       new SpriteMaterial({ map: texture, transparent: true, depthTest: false }),
     );
     this.hud.name = 'Paintball Round HUD';
-    this.hud.position.set(-0.64, 0.28, 0.43);
-    this.hud.scale.set(0.38, 0.21, 1);
+    this.hud.position.set(0.18, 0.25, -0.85);
+    this.hud.scale.set(0.3, 0.125, 1);
     this.hud.renderOrder = 19;
     this.hud.visible = false;
-    parent.add(this.hud);
+    this.world.player.head.add(this.hud);
 
     const popCanvas = document.createElement('canvas');
     popCanvas.width = 256;
@@ -203,24 +208,15 @@ export class PaintballBlasterSystem extends createSystem({
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       context.font = '900 88px system-ui, sans-serif';
-      context.fillStyle = '#FF3FAD';
-      context.strokeStyle = '#FFFFFF';
-      context.lineWidth = 10;
+      context.fillStyle = '#FFE179';
+      context.strokeStyle = '#6B1530';
+      context.lineWidth = 12;
       context.strokeText('+1', 128, 65);
       context.fillText('+1', 128, 65);
     }
-    const popTexture = new CanvasTexture(popCanvas);
-    popTexture.colorSpace = SRGBColorSpace;
-    popTexture.minFilter = LinearFilter;
-    this.hitPop = new Sprite(
-      new SpriteMaterial({ map: popTexture, transparent: true, depthTest: false, opacity: 0 }),
-    );
-    this.hitPop.name = 'Paintball Hit Plus One';
-    this.hitPop.position.set(-0.45, 0.37, 0.43);
-    this.hitPop.scale.set(0.001, 0.001, 1);
-    this.hitPop.renderOrder = 20;
-    this.hitPop.visible = false;
-    parent.add(this.hitPop);
+    this.hitPopupTexture = new CanvasTexture(popCanvas);
+    this.hitPopupTexture.colorSpace = SRGBColorSpace;
+    this.hitPopupTexture.minFilter = LinearFilter;
   }
 
   private startRound(): void {
@@ -236,9 +232,7 @@ export class PaintballBlasterSystem extends createSystem({
     this.roundActive = false;
     this.roundStartedAt = 0;
     this.roundHits = 0;
-    this.hitPopUntil = 0;
     if (this.hud != null) this.hud.visible = false;
-    if (this.hitPop != null) this.hitPop.visible = false;
   }
 
   private updateHud(time: number): void {
@@ -250,16 +244,6 @@ export class PaintballBlasterSystem extends createSystem({
       remaining = ROUND_SECONDS;
     }
     if (remaining !== this.renderedSecond) this.renderHud(remaining);
-    if (this.hitPop != null) {
-      const remainingPop = this.hitPopUntil - time;
-      this.hitPop.visible = remainingPop > 0;
-      if (remainingPop > 0) {
-        const progress = 1 - remainingPop / 0.55;
-        const scale = 0.7 + Math.sin(Math.min(1, progress) * Math.PI) * 0.3;
-        this.hitPop.scale.set(0.13 * scale, 0.065 * scale, 1);
-        this.hitPop.material.opacity = Math.min(1, remainingPop * 5);
-      }
-    }
   }
 
   private renderHud(remaining?: number): void {
@@ -270,34 +254,91 @@ export class PaintballBlasterSystem extends createSystem({
     const seconds = remaining ?? Math.max(0, Math.ceil(ROUND_SECONDS - (this.currentTime - this.roundStartedAt)));
     this.renderedSecond = seconds;
     context.clearRect(0, 0, canvas.width, canvas.height);
-    context.shadowColor = 'rgba(255, 43, 150, 0.45)';
-    context.shadowBlur = 26;
-    context.fillStyle = 'rgba(47, 17, 55, 0.94)';
+    context.shadowColor = 'rgba(47, 12, 20, 0.24)';
+    context.shadowBlur = 14;
+    context.fillStyle = '#752E3B';
     context.beginPath();
-    context.roundRect(20, 20, 728, 380, 62);
+    context.roundRect(20, 20, 728, 280, 54);
     context.fill();
     context.shadowColor = 'transparent';
-    context.strokeStyle = '#FF52B4';
-    context.lineWidth = 8;
+    context.strokeStyle = '#944755';
+    context.lineWidth = 7;
     context.stroke();
-    context.textAlign = 'center';
-    context.fillStyle = '#FFD4EC';
-    context.font = '700 34px system-ui, sans-serif';
-    context.fillText('PAINTBALL ROUND', 384, 85);
-    context.fillStyle = '#FF3F9B';
-    context.font = '900 118px system-ui, sans-serif';
-    context.fillText(`00:${String(seconds).padStart(2, '0')}`, 384, 220);
+
+    // Minimal clock icon, drawn without adding an icon dependency.
+    context.strokeStyle = '#FFFFFF';
+    context.lineWidth = 9;
+    context.beginPath();
+    context.arc(151, 125, 43, 0, Math.PI * 2);
+    context.stroke();
+    context.beginPath();
+    context.moveTo(151, 125);
+    context.lineTo(151, 96);
+    context.moveTo(151, 125);
+    context.lineTo(176, 140);
+    context.stroke();
     context.fillStyle = '#FFFFFF';
-    context.font = '800 62px system-ui, sans-serif';
-    context.fillText(`HITS: ${this.roundHits}`, 384, 330);
+    context.font = '900 120px system-ui, sans-serif';
+    context.textAlign = 'left';
+    context.fillText(`00:${String(seconds).padStart(2, '0')}`, 218, 165);
+    context.fillStyle = '#FFFFFF';
+    context.font = '800 50px system-ui, sans-serif';
+    context.textAlign = 'center';
+    context.fillText(`HITS: ${this.roundHits}`, 384, 253);
     if (hud.material.map != null) hud.material.map.needsUpdate = true;
   }
 
   private disposeHud(): void {
-    for (const sprite of [this.hud, this.hitPop]) {
-      sprite?.removeFromParent();
-      sprite?.material.map?.dispose();
-      sprite?.material.dispose();
+    this.hud?.removeFromParent();
+    this.hud?.material.map?.dispose();
+    this.hud?.material.dispose();
+    for (const popup of this.hitPopups) {
+      popup.sprite.removeFromParent();
+      popup.sprite.material.dispose();
+    }
+    this.hitPopups.length = 0;
+    this.hitPopupTexture?.dispose();
+  }
+
+  private createHitPopup(target: Entity, time: number): void {
+    if (this.hitPopupTexture == null || target.object3D == null) return;
+    const monsterType = target.getValue(MonsterAvatar, 'monsterType');
+    const height = monsterType == null ? 0.14 : monsterByType(monsterType as MonsterType).targetHeight;
+    target.object3D.updateWorldMatrix(true, false);
+    const origin = target.object3D.localToWorld(new Vector3(0, height * 0.9, 0));
+    const sprite = new Sprite(
+      new SpriteMaterial({
+        map: this.hitPopupTexture,
+        transparent: true,
+        depthTest: false,
+        opacity: 1,
+      }),
+    );
+    sprite.name = 'Paintball Hit Plus One';
+    sprite.position.copy(origin);
+    sprite.scale.set(0.001, 0.001, 1);
+    sprite.renderOrder = 34;
+    this.world.scene.add(sprite);
+    this.hitPopups.push({ sprite, origin, startedAt: time });
+  }
+
+  private updateHitPopups(time: number): void {
+    for (let index = this.hitPopups.length - 1; index >= 0; index -= 1) {
+      const popup = this.hitPopups[index];
+      const elapsed = time - popup.startedAt;
+      if (elapsed >= 3) {
+        popup.sprite.removeFromParent();
+        popup.sprite.material.dispose();
+        this.hitPopups.splice(index, 1);
+        continue;
+      }
+      const appear = Math.min(1, elapsed / 0.22);
+      const fade = elapsed < 1.8 ? 1 : Math.max(0, (3 - elapsed) / 1.2);
+      const scale = 0.82 + 0.18 * Math.sin(appear * Math.PI * 0.5);
+      popup.sprite.position.copy(popup.origin);
+      popup.sprite.position.y += Math.min(1, elapsed / 3) * 0.12;
+      popup.sprite.scale.set(0.16 * scale, 0.08 * scale, 1);
+      popup.sprite.material.opacity = Math.min(appear, fade);
     }
   }
 

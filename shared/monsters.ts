@@ -115,5 +115,12 @@ export function commandForBehavior(
 
 export function supportedCommands(type: MonsterType): string[] {
   const actionCommands = Object.keys(MONSTER_COMMANDS[monsterByType(type).category]);
-  return ['!join', ...actionCommands, '!leave'];
+  return [
+    '!join',
+    ...actionCommands,
+    '!support',
+    '!like',
+    '!fire',
+    '!leave',
+  ];
 }

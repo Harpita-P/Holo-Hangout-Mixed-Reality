@@ -20,8 +20,11 @@ export const AvatarBehaviors = {
 export type AvatarBehavior =
   (typeof AvatarBehaviors)[keyof typeof AvatarBehaviors];
 
+export type ReactionType = 'support' | 'like' | 'fire';
+
 export interface ParticipantSnapshot {
   userId: string;
+  isBot: boolean;
   displayName: string;
   colorHex: string;
   slot: number;
@@ -49,6 +52,8 @@ export type ServerMessage =
     }
   | { type: 'avatar.join'; participant: ParticipantSnapshot }
   | { type: 'avatar.chat'; userId: string; text: string }
+  | { type: 'viewer.welcome'; userId: string; displayName: string }
+  | { type: 'avatar.reaction'; userId: string; reaction: ReactionType }
   | {
       type: 'avatar.action';
       userId: string;
