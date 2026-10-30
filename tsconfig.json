@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "types": ["@iwsdk/vite-plugin-dev/client"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "shared/**/*.ts"]
 }

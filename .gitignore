@@ -9,6 +9,7 @@ artifacts/
 
 # Environment files
 .env
+.chatirl/
 .env.local
 .env.production
 

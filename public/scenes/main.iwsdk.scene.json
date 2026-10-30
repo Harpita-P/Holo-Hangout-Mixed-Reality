@@ -66,6 +66,106 @@
               "rotate": true
             }
           }
+        },
+        {
+          "id": "viewer-slot-01",
+          "name": "Viewer Slot 01",
+          "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
+          "transform": { "position": [-0.24, 0.044, 0.13], "scale": [0.001, 0.001, 0.001] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
+          }
+        },
+        {
+          "id": "viewer-slot-02",
+          "name": "Viewer Slot 02",
+          "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
+          "transform": { "position": [-0.12, 0.044, 0.15], "scale": [0.001, 0.001, 0.001] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
+          }
+        },
+        {
+          "id": "viewer-slot-03",
+          "name": "Viewer Slot 03",
+          "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
+          "transform": { "position": [0, 0.044, 0.15], "scale": [0.001, 0.001, 0.001] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
+          }
+        },
+        {
+          "id": "viewer-slot-04",
+          "name": "Viewer Slot 04",
+          "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
+          "transform": { "position": [0.12, 0.044, 0.15], "scale": [0.001, 0.001, 0.001] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
+          }
+        },
+        {
+          "id": "viewer-slot-05",
+          "name": "Viewer Slot 05",
+          "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
+          "transform": { "position": [0.24, 0.044, 0.13], "scale": [0.001, 0.001, 0.001] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
+          }
+        },
+        {
+          "id": "viewer-slot-06",
+          "name": "Viewer Slot 06",
+          "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
+          "transform": { "position": [-0.24, 0.044, -0.13], "scale": [0.001, 0.001, 0.001] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
+          }
+        },
+        {
+          "id": "viewer-slot-07",
+          "name": "Viewer Slot 07",
+          "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
+          "transform": { "position": [-0.12, 0.044, -0.15], "scale": [0.001, 0.001, 0.001] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
+          }
+        },
+        {
+          "id": "viewer-slot-08",
+          "name": "Viewer Slot 08",
+          "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
+          "transform": { "position": [0, 0.044, -0.15], "scale": [0.001, 0.001, 0.001] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
+          }
+        },
+        {
+          "id": "viewer-slot-09",
+          "name": "Viewer Slot 09",
+          "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
+          "transform": { "position": [0.12, 0.044, -0.15], "scale": [0.001, 0.001, 0.001] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
+          }
+        },
+        {
+          "id": "viewer-slot-10",
+          "name": "Viewer Slot 10",
+          "content": { "type": "asset", "asset": "viewer-avatar", "castShadow": true },
+          "transform": { "position": [0.24, 0.044, -0.13], "scale": [0.001, 0.001, 0.001] },
+          "components": {
+            "OneHandGrabbable": { "translate": true, "rotate": true },
+            "ViewerAvatar": { "userId": "", "displayName": "", "colorHex": "#2ED7C4", "behavior": "idle", "actionSequence": 0, "targetX": 0, "targetZ": 0 }
+          }
         }
       ]
     },

@@ -10,7 +10,18 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [iwsdkDev()],
-  server: { host: '0.0.0.0', port: 8081, open: false },
+  server: {
+    host: '0.0.0.0',
+    port: 8081,
+    open: false,
+    proxy: {
+      '/chatirl': {
+        target: 'ws://127.0.0.1:8787',
+        ws: true,
+        rewrite: () => '/ws',
+      },
+    },
+  },
   build: {
     outDir: 'dist',
     sourcemap: process.env.NODE_ENV !== 'production',

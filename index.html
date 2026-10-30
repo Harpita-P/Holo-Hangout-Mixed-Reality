@@ -9,12 +9,37 @@
     <link rel="icon" href="data:," />
     <meta
       name="description"
-      content="ChatIRL Phase 1 mixed-reality hand-tracking validation"
+      content="ChatIRL Phase 2 — Twitch viewers become interactive tabletop avatars"
     />
-    <title>ChatIRL — Mixed Reality Validation</title>
+    <title>ChatIRL — Twitch Tabletop Community</title>
+    <style>
+      html, body, #scene-container { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      #connection-status {
+        position: fixed;
+        left: 16px;
+        bottom: 16px;
+        z-index: 20;
+        max-width: min(460px, calc(100vw - 32px));
+        box-sizing: border-box;
+        padding: 9px 13px;
+        border: 1px solid rgba(255,255,255,.22);
+        border-radius: 999px;
+        background: rgba(6,20,24,.84);
+        color: #fff;
+        font: 600 13px/1.3 system-ui, sans-serif;
+        backdrop-filter: blur(10px);
+        pointer-events: none;
+      }
+      #connection-status[data-state="ready"] { border-color: #2ed7c4; }
+      #connection-status[data-state="waiting"] { border-color: #ffc76c; }
+      @media (display-mode: standalone) { #connection-status { bottom: 24px; } }
+    </style>
   </head>
-  <body style="margin: 0">
+  <body>
     <div id="scene-container"></div>
+    <div id="connection-status" data-state="offline" role="status" aria-live="polite">
+      Connecting to ChatIRL backend…
+    </div>
     <script type="module" src="/src/index.ts"></script>
   </body>
 </html>
