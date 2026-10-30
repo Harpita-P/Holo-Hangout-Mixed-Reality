@@ -10,6 +10,9 @@
     "dev:status": "iwsdk dev status",
     "server": "node --import tsx server/index.ts",
     "server:watch": "node --watch --import tsx server/index.ts",
+    "capture:receiver": "node tools/quest-capture-receiver.mjs",
+    "capture:build": "node tools/build-quest-capture.mjs",
+    "capture:install": "adb install -r quest-capture/app/build/outputs/apk/debug/app-debug.apk",
     "reference:status": "iwsdk reference status",
     "reference:warmup": "iwsdk reference warmup",
     "typecheck": "npm run typecheck:web && npm run typecheck:server",
@@ -22,6 +25,7 @@
   "dependencies": {
     "@iwsdk/core": "1.1.0-rc.2",
     "dotenv": "^18.0.9",
+    "obs-websocket-js": "^5.0.8",
     "three": "npm:super-three@0.185.0",
     "ws": "^8.22.0"
   },

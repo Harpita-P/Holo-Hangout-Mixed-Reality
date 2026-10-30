@@ -6,6 +6,9 @@ node_modules/
 dist/
 artifacts/
 *.tsbuildinfo
+.gradle/
+quest-capture/app/build/
+quest-capture/build/
 
 # Environment files
 .env

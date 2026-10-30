@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ChatIRL Capture Motion Test</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #07181d; color: #f4fffd; }
+      main { width: min(88vw, 860px); }
+      h1 { margin: 0 0 0.5rem; font-size: clamp(2rem, 6vw, 4.5rem); }
+      #clock { font: 700 clamp(1.5rem, 5vw, 3.5rem) ui-monospace, monospace; color: #2ed7c4; }
+      .track { margin-top: 2rem; height: 5rem; border: 3px solid #2ed7c4; border-radius: 1rem; overflow: hidden; }
+      .marker { width: 5rem; height: 100%; background: #ff7849; animation: sweep 2s linear infinite alternate; }
+      @keyframes sweep { to { transform: translateX(calc(min(88vw, 860px) - 5rem)); } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Capture is moving</h1>
+      <div id="clock" aria-live="off"></div>
+      <div class="track"><div class="marker"></div></div>
+    </main>
+    <script>
+      const clock = document.querySelector('#clock');
+      const render = () => {
+        clock.textContent = `${new Date().toISOString()} · ${Math.floor(performance.now())}`;
+        requestAnimationFrame(render);
+      };
+      render();
+    </script>
+  </body>
+</html>
