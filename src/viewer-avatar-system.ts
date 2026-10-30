@@ -9,14 +9,18 @@ import {
   type Entity,
   Grabbed,
   GrabSystem,
+  Group,
   LinearFilter,
   LoopOnce,
   LoopRepeat,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
+  SphereGeometry,
   Sprite,
   SpriteMaterial,
   SRGBColorSpace,
+  TorusGeometry,
   type Object3D,
   Vector3,
 } from '@iwsdk/core';
@@ -31,6 +35,7 @@ import {
   AvatarBehaviors,
   type AvatarBehavior,
   type ParticipantSnapshot,
+  type CommunityLeaderboardEntry,
   type ServerMessage,
 } from '../shared/protocol.js';
 import { ChatIRLSocket, type SocketStatus } from './chatirl-socket.js';
@@ -54,7 +59,7 @@ interface AvatarRuntime {
   bubbleText: string;
   bubbleShownAt: number;
   bubbleExpiresAt: number;
-  splatter: Sprite | null;
+  impact: PaintImpact | null;
   hitStartedAt: number;
   hitRespawnAt: number;
   hitOriginX: number;
@@ -83,6 +88,13 @@ interface AvatarRuntime {
   autonomySequence: number;
 }
 
+interface PaintImpact {
+  root: Group;
+  core: Mesh;
+  rings: Mesh[];
+  particles: Mesh[];
+}
+
 const TABLE_MIN_X = -0.765;
 const TABLE_MAX_X = 0.765;
 const TABLE_MIN_Z = -0.495;
@@ -94,6 +106,9 @@ const TERRAIN_OBSTACLES = [
   { x: 0.58, z: -0.33, radius: 0.15 },
   { x: 0.57, z: 0.36, radius: 0.17 },
 ] as const;
+const impactCoreGeometry = new SphereGeometry(0.5, 12, 8);
+const impactRingGeometry = new TorusGeometry(0.5, 0.055, 6, 24);
+const impactParticleGeometry = new SphereGeometry(0.09, 8, 6);
 const proceduralFallbackRequested =
   new URLSearchParams(window.location.search).get('proceduralAvatars') === '1';
 
@@ -111,6 +126,11 @@ export class ViewerAvatarSystem extends createSystem({
   private backendConnected = false;
   private twitchConnected = false;
   private broadcasterLogin: string | null = null;
+  private communityEntries: CommunityLeaderboardEntry[] = [];
+  private leaderboardPanel: Sprite | null = null;
+  private leaderboardCanvas: HTMLCanvasElement | null = null;
+  private bannerPanel: Sprite | null = null;
+  private bannerCanvas: HTMLCanvasElement | null = null;
   private currentTime = 0;
 
   init(): void {
@@ -122,6 +142,7 @@ export class ViewerAvatarSystem extends createSystem({
       ),
     );
     for (const entity of this.slots) this.prepareSlot(entity);
+    this.createCommunityPanels();
 
     const offHeld = this.queries.held.subscribe('qualify', (entity) => {
       const runtime = this.runtimes.get(entity);
@@ -204,7 +225,7 @@ export class ViewerAvatarSystem extends createSystem({
       bubbleText: '',
       bubbleShownAt: 0,
       bubbleExpiresAt: 0,
-      splatter: null,
+      impact: null,
       hitStartedAt: 0,
       hitRespawnAt: 0,
       hitOriginX: object.position.x,
@@ -258,6 +279,11 @@ export class ViewerAvatarSystem extends createSystem({
         this.twitchConnected = message.twitchConnected;
         this.broadcasterLogin = message.broadcasterLogin;
         this.renderStatus();
+        this.renderWorldBanner();
+        break;
+      case 'community.leaderboard':
+        this.communityEntries = message.entries;
+        this.renderLeaderboard();
         break;
     }
   }
@@ -488,61 +514,73 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.hitRespawnAt = time + 0.58;
     runtime.moving = false;
     this.removePaintSplatter(runtime);
-    runtime.splatter = this.createPaintSplatter(runtime);
+    runtime.impact = this.createPaintImpact(runtime);
     object.visible = false;
   }
 
-  private createPaintSplatter(runtime: AvatarRuntime): Sprite | null {
+  private createPaintImpact(runtime: AvatarRuntime): PaintImpact | null {
     const object = runtime.entity.object3D;
     const parent = object?.parent;
     if (object == null || parent == null) return null;
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
-    const context = canvas.getContext('2d');
-    if (context == null) return null;
-    context.fillStyle = '#FF3F9B';
-    context.beginPath();
-    context.arc(128, 128, 62, 0, Math.PI * 2);
-    for (let index = 0; index < 10; index += 1) {
-      const angle = (index / 10) * Math.PI * 2;
-      const distance = index % 2 === 0 ? 88 : 74;
-      context.moveTo(128 + Math.cos(angle) * distance + 14, 128 + Math.sin(angle) * distance);
-      context.arc(
-        128 + Math.cos(angle) * distance,
-        128 + Math.sin(angle) * distance,
-        index % 2 === 0 ? 14 : 9,
-        0,
-        Math.PI * 2,
+    const root = new Group();
+    root.name = 'Paintball Pink Energy Impact';
+    root.position.copy(object.position);
+    root.position.y += (runtime.monster?.targetHeight ?? 0.18) * 0.55;
+    root.scale.setScalar(0.001);
+    const core = new Mesh(
+      impactCoreGeometry,
+      new MeshBasicMaterial({ color: '#FF2D9B', transparent: true, opacity: 1, depthTest: false }),
+    );
+    core.renderOrder = 31;
+    root.add(core);
+    const rings = [0, Math.PI / 2].map((rotation) => {
+      const ring = new Mesh(
+        impactRingGeometry,
+        new MeshBasicMaterial({ color: '#FF8CD1', transparent: true, opacity: 1, depthTest: false }),
       );
-    }
-    context.fill();
-    context.fillStyle = '#FFD2E8';
-    context.beginPath();
-    context.arc(109, 105, 18, 0, Math.PI * 2);
-    context.fill();
-
-    const texture = new CanvasTexture(canvas);
-    texture.colorSpace = SRGBColorSpace;
-    texture.minFilter = LinearFilter;
-    const material = new SpriteMaterial({ map: texture, transparent: true, depthTest: false });
-    const splatter = new Sprite(material);
-    splatter.name = 'Paintball Pink Splatter';
-    splatter.position.copy(object.position);
-    splatter.position.y += (runtime.monster?.targetHeight ?? 0.18) * 0.55;
-    splatter.scale.setScalar(0.001);
-    splatter.renderOrder = 30;
-    parent.add(splatter);
-    return splatter;
+      ring.rotation.x = rotation;
+      ring.renderOrder = 30;
+      root.add(ring);
+      return ring;
+    });
+    const particles = Array.from({ length: 7 }, (_, index) => {
+      const particle = new Mesh(
+        impactParticleGeometry,
+        new MeshBasicMaterial({ color: index % 2 === 0 ? '#FF3FAD' : '#FFD0EC', transparent: true, opacity: 1, depthTest: false }),
+      );
+      particle.userData.impactAngle = (index / 7) * Math.PI * 2;
+      particle.userData.impactLift = index % 3 === 0 ? 0.55 : index % 3 === 1 ? 0.05 : -0.3;
+      particle.renderOrder = 32;
+      root.add(particle);
+      return particle;
+    });
+    parent.add(root);
+    return { root, core, rings, particles };
   }
 
   private updatePaintballHit(runtime: AvatarRuntime, time: number): void {
     const elapsed = Math.max(0, time - runtime.hitStartedAt);
-    if (runtime.splatter != null) {
-      const pop = elasticOut(clamp(elapsed / 0.16, 0, 1));
-      const fade = 1 - clamp((elapsed - 0.3) / 0.25, 0, 1);
-      runtime.splatter.scale.setScalar(0.28 + pop * 0.22);
-      runtime.splatter.material.opacity = fade;
+    if (runtime.impact != null) {
+      const pop = elasticOut(clamp(elapsed / 0.14, 0, 1));
+      const fade = 1 - clamp((elapsed - 0.28) / 0.26, 0, 1);
+      runtime.impact.root.scale.setScalar(0.08 + pop * 0.26);
+      runtime.impact.core.scale.setScalar(1 - clamp(elapsed / 0.5, 0, 0.7));
+      (runtime.impact.core.material as MeshBasicMaterial).opacity = fade;
+      runtime.impact.rings.forEach((ring, index) => {
+        ring.scale.setScalar(0.65 + elapsed * (0.7 + index * 0.15));
+        ring.rotation.z += 0.08 + index * 0.025;
+        (ring.material as MeshBasicMaterial).opacity = fade * 0.82;
+      });
+      runtime.impact.particles.forEach((particle) => {
+        const distance = 0.18 + elapsed * 0.45;
+        const angle = particle.userData.impactAngle as number;
+        particle.position.set(
+          Math.cos(angle) * distance,
+          (particle.userData.impactLift as number) * distance,
+          Math.sin(angle) * distance,
+        );
+        (particle.material as MeshBasicMaterial).opacity = fade;
+      });
     }
     if (time < runtime.hitRespawnAt) return;
     const object = runtime.entity.object3D;
@@ -577,12 +615,13 @@ export class ViewerAvatarSystem extends createSystem({
   }
 
   private removePaintSplatter(runtime: AvatarRuntime): void {
-    const splatter = runtime.splatter;
-    if (splatter == null) return;
-    splatter.removeFromParent();
-    splatter.material.map?.dispose();
-    splatter.material.dispose();
-    runtime.splatter = null;
+    const impact = runtime.impact;
+    if (impact == null) return;
+    impact.root.removeFromParent();
+    impact.root.traverse((child) => {
+      if (child instanceof Mesh && child.material instanceof MeshBasicMaterial) child.material.dispose();
+    });
+    runtime.impact = null;
   }
 
   private animate(entity: Entity, runtime: AvatarRuntime, delta: number, time: number): void {
@@ -890,11 +929,11 @@ export class ViewerAvatarSystem extends createSystem({
     context.shadowColor = 'transparent';
 
     context.fillStyle = '#293340';
-    context.font = '600 36px system-ui, sans-serif';
+    context.font = '600 40px system-ui, sans-serif';
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     const lines = wrapBubbleText(context, text, 530, 3);
-    const lineHeight = 52;
+    const lineHeight = 56;
     const startY = 134 - ((lines.length - 1) * lineHeight) / 2;
     lines.forEach((line, index) => context.fillText(line, 320, startY + index * lineHeight));
 
@@ -940,6 +979,159 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.bubbleText = '';
     runtime.bubbleShownAt = 0;
     runtime.bubbleExpiresAt = 0;
+  }
+
+  private createCommunityPanels(): void {
+    const parent = this.slots[0]?.object3D?.parent;
+    if (parent == null) return;
+
+    this.leaderboardCanvas = document.createElement('canvas');
+    this.leaderboardCanvas.width = 768;
+    this.leaderboardCanvas.height = 720;
+    this.leaderboardPanel = this.createWorldPanel(
+      this.leaderboardCanvas,
+      'Top Active Community Members',
+      new Vector3(0.63, 0.29, 0.43),
+      new Vector3(0.39, 0.365, 1),
+    );
+    parent.add(this.leaderboardPanel);
+
+    this.bannerCanvas = document.createElement('canvas');
+    this.bannerCanvas.width = 1024;
+    this.bannerCanvas.height = 256;
+    this.bannerPanel = this.createWorldPanel(
+      this.bannerCanvas,
+      'Streamer World Banner',
+      new Vector3(0, 0.34, -0.55),
+      new Vector3(0.7, 0.175, 1),
+    );
+    parent.add(this.bannerPanel);
+    this.renderLeaderboard();
+    this.renderWorldBanner();
+    this.cleanupFuncs.push(() => {
+      for (const panel of [this.leaderboardPanel, this.bannerPanel]) {
+        panel?.removeFromParent();
+        panel?.material.map?.dispose();
+        panel?.material.dispose();
+      }
+    });
+  }
+
+  private createWorldPanel(
+    canvas: HTMLCanvasElement,
+    name: string,
+    position: Vector3,
+    scale: Vector3,
+  ): Sprite {
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.minFilter = LinearFilter;
+    const material = new SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+    const panel = new Sprite(material);
+    panel.name = name;
+    panel.position.copy(position);
+    panel.scale.copy(scale);
+    panel.renderOrder = 18;
+    return panel;
+  }
+
+  private renderLeaderboard(): void {
+    const canvas = this.leaderboardCanvas;
+    const panel = this.leaderboardPanel;
+    const context = canvas?.getContext('2d');
+    if (canvas == null || panel == null || context == null) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.shadowColor = 'rgba(116, 67, 190, 0.25)';
+    context.shadowBlur = 28;
+    context.fillStyle = 'rgba(249, 246, 255, 0.96)';
+    context.beginPath();
+    context.roundRect(28, 28, 712, 664, 56);
+    context.fill();
+    context.shadowColor = 'transparent';
+    context.strokeStyle = '#D7B9FF';
+    context.lineWidth = 8;
+    context.stroke();
+
+    context.textAlign = 'center';
+    context.fillStyle = '#4C3C66';
+    context.font = '700 34px system-ui, sans-serif';
+    context.fillText('TOP ACTIVE', 384, 105);
+    context.fillStyle = '#D72D92';
+    context.font = '900 58px system-ui, sans-serif';
+    context.fillText('COMMUNITY', 384, 165);
+    context.fillStyle = '#4C3C66';
+    context.font = '700 31px system-ui, sans-serif';
+    context.fillText('MEMBERS', 384, 208);
+
+    if (this.communityEntries.length === 0) {
+      context.fillStyle = '#8B7D9F';
+      context.font = '600 34px system-ui, sans-serif';
+      context.fillText('Waiting for the community…', 384, 410);
+    } else {
+      this.communityEntries.slice(0, 3).forEach((entry, index) => {
+        const y = 252 + index * 137;
+        context.fillStyle = index === 0 ? '#FCE3F4' : '#F0EAFE';
+        context.beginPath();
+        context.roundRect(72, y, 624, 108, 32);
+        context.fill();
+        if (index === 0) {
+          context.strokeStyle = '#F05BB0';
+          context.lineWidth = 5;
+          context.stroke();
+        }
+        context.textAlign = 'left';
+        context.fillStyle = index === 0 ? '#D72D92' : '#73589A';
+        context.font = '800 42px system-ui, sans-serif';
+        context.fillText(`${index + 1}`, 101, y + 68);
+        context.fillStyle = '#342A45';
+        context.font = '700 37px system-ui, sans-serif';
+        context.fillText(entry.displayName, 168, y + 66, 365);
+        context.textAlign = 'right';
+        context.fillStyle = '#A72A98';
+        context.font = '800 36px system-ui, sans-serif';
+        context.fillText(String(entry.score), 654, y + 66);
+      });
+    }
+    if (panel.material.map != null) panel.material.map.needsUpdate = true;
+  }
+
+  private renderWorldBanner(): void {
+    const canvas = this.bannerCanvas;
+    const panel = this.bannerPanel;
+    const context = canvas?.getContext('2d');
+    if (canvas == null || panel == null || context == null) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.shadowColor = 'rgba(243, 60, 175, 0.48)';
+    context.shadowBlur = 25;
+    context.fillStyle = 'rgba(44, 25, 66, 0.94)';
+    context.beginPath();
+    context.roundRect(18, 18, 988, 220, 62);
+    context.fill();
+    context.shadowColor = 'transparent';
+    context.strokeStyle = '#C969FF';
+    context.lineWidth = 6;
+    context.stroke();
+
+    const username = this.broadcasterLogin ?? 'streamer';
+    context.font = '800 53px system-ui, sans-serif';
+    const prefix = 'Hang Out in ';
+    const suffix = "'s World!";
+    const widths = [prefix, username, suffix].map((part) => context.measureText(part).width);
+    let x = (canvas.width - widths.reduce((sum, width) => sum + width, 0)) / 2;
+    context.textAlign = 'left';
+    context.fillStyle = '#FFFFFF';
+    context.fillText(prefix, x, 112);
+    x += widths[0];
+    context.fillStyle = '#FF5BC8';
+    context.fillText(username, x, 112);
+    x += widths[1];
+    context.fillStyle = '#FFFFFF';
+    context.fillText(suffix, x, 112);
+    context.textAlign = 'center';
+    context.fillStyle = '#E6C7FF';
+    context.font = '700 31px system-ui, sans-serif';
+    context.fillText('CHAT • PLAY • HANG OUT', 512, 176);
+    if (panel.material.map != null) panel.material.map.needsUpdate = true;
   }
 
   private setSocketStatus(status: SocketStatus): void {

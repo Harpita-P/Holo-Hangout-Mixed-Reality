@@ -115,6 +115,7 @@ webSockets.on('connection', (socket) => {
       if (!isClientMessage(message)) return;
       if (message.type === 'client.ready') {
         socket.send(JSON.stringify(participants.snapshotMessage()));
+        socket.send(JSON.stringify(participants.leaderboardMessage()));
         socket.send(JSON.stringify(statusMessage()));
       }
       // avatar.held is intentionally informational. !leave remains authoritative

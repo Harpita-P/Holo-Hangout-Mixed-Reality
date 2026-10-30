@@ -1,6 +1,7 @@
 import {
   AvatarBehaviors,
   type ParticipantSnapshot,
+  type CommunityLeaderboardEntry,
   type ServerMessage,
 } from '../shared/protocol.js';
 import {
@@ -27,6 +28,7 @@ export interface ParticipantManagerOptions {
   maxParticipants?: number;
   actionCooldownMs?: number;
   chatCooldownMs?: number;
+  scoreCooldownMs?: number;
   leaveDeadlineMs?: number;
   emit: (message: ServerMessage) => void;
 }
@@ -36,9 +38,12 @@ export class ParticipantManager {
   private readonly cooldowns = new Map<string, number>();
   private readonly chatCooldowns = new Map<string, number>();
   private readonly lastMonsterByUser = new Map<string, MonsterType>();
+  private readonly scores = new Map<string, number>();
+  private readonly scoreCooldowns = new Map<string, number>();
   private readonly maxParticipants: number;
   private readonly actionCooldownMs: number;
   private readonly chatCooldownMs: number;
+  private readonly scoreCooldownMs: number;
   private readonly leaveDeadlineMs: number;
   private acceptingJoins = true;
 
@@ -46,6 +51,7 @@ export class ParticipantManager {
     this.maxParticipants = options.maxParticipants ?? 10;
     this.actionCooldownMs = options.actionCooldownMs ?? 750;
     this.chatCooldownMs = options.chatCooldownMs ?? 2000;
+    this.scoreCooldownMs = options.scoreCooldownMs ?? 1000;
     this.leaveDeadlineMs = options.leaveDeadlineMs ?? 1200;
   }
 
@@ -63,6 +69,21 @@ export class ParticipantManager {
       participants: this.snapshot(),
       acceptingJoins: this.acceptingJoins,
     };
+  }
+
+  leaderboardMessage(): Extract<ServerMessage, { type: 'community.leaderboard' }> {
+    const entries: CommunityLeaderboardEntry[] = [...this.participants.values()]
+      .filter(({ behavior }) => behavior !== AvatarBehaviors.Leaving)
+      .map(({ userId, displayName, slot }) => ({
+        userId,
+        displayName,
+        score: this.scores.get(userId) ?? 0,
+        slot,
+      }))
+      .sort((left, right) => right.score - left.score || left.slot - right.slot)
+      .slice(0, 3)
+      .map(({ slot: _slot, ...entry }) => entry);
+    return { type: 'community.leaderboard', entries };
   }
 
   handleChat(message: ChatMessage): boolean {
@@ -92,6 +113,7 @@ export class ParticipantManager {
     if (!safeText) return false;
     this.chatCooldowns.set(message.userId, now + this.chatCooldownMs);
     this.options.emit({ type: 'avatar.chat', userId: message.userId, text: safeText });
+    this.awardScore(message.userId, 1, now);
     return true;
   }
 
@@ -113,10 +135,20 @@ export class ParticipantManager {
     this.participants.clear();
     this.cooldowns.clear();
     this.chatCooldowns.clear();
+    this.scores.clear();
+    this.scoreCooldowns.clear();
+    this.options.emit(this.leaderboardMessage());
   }
 
   private join(userId: string, displayName: string): boolean {
-    if (!this.acceptingJoins || this.participants.has(userId)) {
+    const existing = this.participants.get(userId);
+    if (existing != null) {
+      if (existing.behavior === AvatarBehaviors.Leaving) return false;
+      this.options.emit({ type: 'avatar.join', participant: this.public(existing) });
+      this.options.emit(this.leaderboardMessage());
+      return true;
+    }
+    if (!this.acceptingJoins) {
       return false;
     }
     const slot = this.nextOpenSlot();
@@ -144,7 +176,9 @@ export class ParticipantManager {
       leaveTimer: null,
     };
     this.participants.set(userId, participant);
+    this.scores.set(userId, 0);
     this.options.emit({ type: 'avatar.join', participant: this.public(participant) });
+    this.options.emit(this.leaderboardMessage());
     return true;
   }
 
@@ -176,6 +210,7 @@ export class ParticipantManager {
       targetX: participant.targetX,
       targetZ: participant.targetZ,
     });
+    this.awardScore(userId, 2, now);
     participant.actionTimer = setTimeout(() => {
       if (participant.behavior !== AvatarBehaviors.Leaving) {
         participant.behavior = AvatarBehaviors.Idle;
@@ -206,6 +241,9 @@ export class ParticipantManager {
     }
     participant.behavior = AvatarBehaviors.Leaving;
     participant.actionSequence += 1;
+    this.scores.delete(userId);
+    this.scoreCooldowns.delete(userId);
+    this.options.emit(this.leaderboardMessage());
     this.options.emit({
       type: 'avatar.leave',
       userId,
@@ -215,6 +253,8 @@ export class ParticipantManager {
       this.participants.delete(userId);
       this.cooldowns.delete(userId);
       this.chatCooldowns.delete(userId);
+      this.scores.delete(userId);
+      this.scoreCooldowns.delete(userId);
       this.options.emit({ type: 'avatar.removed', userId });
     }, this.leaveDeadlineMs);
     participant.leaveTimer.unref();
@@ -229,6 +269,15 @@ export class ParticipantManager {
       }
     }
     return -1;
+  }
+
+  private awardScore(userId: string, points: number, now: number): void {
+    const participant = this.participants.get(userId);
+    if (participant == null || participant.behavior === AvatarBehaviors.Leaving) return;
+    if ((this.scoreCooldowns.get(userId) ?? 0) > now) return;
+    this.scoreCooldowns.set(userId, now + this.scoreCooldownMs);
+    this.scores.set(userId, (this.scores.get(userId) ?? 0) + points);
+    this.options.emit(this.leaderboardMessage());
   }
 
   private public(participant: ManagedParticipant): ParticipantSnapshot {

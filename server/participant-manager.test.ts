@@ -18,11 +18,15 @@ test('commands affect only the sending viewer', () => {
   manager.clear();
 });
 
-test('duplicate joins never allocate a second avatar', () => {
-  const manager = new ParticipantManager({ emit: () => undefined });
+test('duplicate joins resync the existing avatar without reallocating it', () => {
+  const emitted: ServerMessage[] = [];
+  const manager = new ParticipantManager({ emit: (message) => emitted.push(message) });
   assert.equal(manager.handleChat({ userId: '1', displayName: 'Alpha', text: '!join' }), true);
-  assert.equal(manager.handleChat({ userId: '1', displayName: 'Alpha', text: '!join' }), false);
+  const original = manager.snapshot()[0];
+  assert.equal(manager.handleChat({ userId: '1', displayName: 'Alpha', text: '!join' }), true);
   assert.equal(manager.snapshot().length, 1);
+  assert.equal(manager.snapshot()[0]?.monsterType, original?.monsterType);
+  assert.equal(emitted.filter((message) => message.type === 'avatar.join').length, 2);
   manager.clear();
 });
 
@@ -115,5 +119,34 @@ test('normal chat is filtered, rate-limited, and emitted only for joined viewers
   assert.equal(emitted.filter((message) => message.type === 'avatar.chat').length, 2);
   manager.handleChat({ userId: '1', displayName: 'Alpha', text: '!leave' });
   assert.equal(manager.handleChat({ userId: '1', displayName: 'Alpha', text: 'after leave' }), false);
+  manager.clear();
+});
+
+test('community leaderboard scores accepted activity and tracks current members only', () => {
+  const emitted: ServerMessage[] = [];
+  const manager = new ParticipantManager({
+    emit: (message) => emitted.push(message),
+    actionCooldownMs: 0,
+    chatCooldownMs: 0,
+    scoreCooldownMs: 0,
+    leaveDeadlineMs: 10,
+  });
+
+  manager.handleChat({ userId: 'alpha', displayName: 'Alpha', text: '!join' });
+  manager.handleChat({ userId: 'beta', displayName: 'Beta', text: '!join' });
+  manager.handleChat({ userId: 'alpha', displayName: 'Alpha', text: '!dance' });
+  manager.handleChat({ userId: 'alpha', displayName: 'Alpha', text: 'hello!' });
+  manager.handleChat({ userId: 'beta', displayName: 'Beta', text: '!unsupported' });
+  manager.handleChat({ userId: 'beta', displayName: 'Beta', text: 'hi!' });
+
+  assert.deepEqual(manager.leaderboardMessage().entries, [
+    { userId: 'alpha', displayName: 'Alpha', score: 3 },
+    { userId: 'beta', displayName: 'Beta', score: 1 },
+  ]);
+  manager.handleChat({ userId: 'alpha', displayName: 'Alpha', text: '!leave' });
+  assert.deepEqual(manager.leaderboardMessage().entries, [
+    { userId: 'beta', displayName: 'Beta', score: 1 },
+  ]);
+  assert.ok(emitted.some((message) => message.type === 'community.leaderboard'));
   manager.clear();
 });

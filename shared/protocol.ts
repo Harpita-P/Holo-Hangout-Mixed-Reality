@@ -35,6 +35,12 @@ export interface ParticipantSnapshot {
   targetZ: number;
 }
 
+export interface CommunityLeaderboardEntry {
+  userId: string;
+  displayName: string;
+  score: number;
+}
+
 export type ServerMessage =
   | {
       type: 'session.snapshot';
@@ -53,6 +59,7 @@ export type ServerMessage =
     }
   | { type: 'avatar.leave'; userId: string; deadlineMs: number }
   | { type: 'avatar.removed'; userId: string }
+  | { type: 'community.leaderboard'; entries: CommunityLeaderboardEntry[] }
   | {
       type: 'server.status';
       twitchConnected: boolean;
