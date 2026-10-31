@@ -1,11 +1,10 @@
-
 # Holo Hangout
 
 ### A New Dimension of Shared Live Experiences
 
 **HoloHangout** brings Twitch viewers into a streamer's mixed reality world as animated characters, allowing creators and their communities to interact, play, and create together in real time.
 
-[Get Started](#quick-start) · [Download Source](https://github.com/Harpita-P/ChatIRL-MixedReality/archive/refs/heads/main.zip) · [Quest Capture APK](release/HoloHangout-Capture.apk)
+[Get Started](#quick-start) · [Download Source](https://github.com/Harpita-P/Holo-Hangout-Mixed-Reality/archive/refs/heads/main.zip) · [Quest Capture APK](release/HoloHangout-Capture.apk)
 
 ## What Can You Do?
 
@@ -33,13 +32,13 @@
 - [FFmpeg](https://ffmpeg.org/download.html)
 - Twitch account and developer application
 
-### 1. Install HoloHangout
+### 1. Install Holo Hangout
 
 Open Terminal (macOS) or PowerShell (Windows):
 
 ```bash
-git clone https://github.com/Harpita-P/ChatIRL-MixedReality.git
-cd ChatIRL-MixedReality
+git clone https://github.com/Harpita-P/Holo-Hangout-Mixed-Reality.git
+cd Holo-Hangout-Mixed-Reality
 npm install
 npm run setup
 ```
@@ -52,7 +51,7 @@ Install the Quest Capture app once:
 npm run capture:install:release
 ```
 
-### 2. Launch HoloHangout
+### 2. Launch Holo Hangout
 
 ```bash
 npm run start:holohangout
