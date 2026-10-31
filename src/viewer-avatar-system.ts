@@ -45,6 +45,12 @@ import {
 } from '../shared/protocol.js';
 import { ChatIRLSocket, type SocketStatus } from './chatirl-socket.js';
 import { ShoutoutTracker } from '../shared/shoutout-tracker.js';
+import {
+  clampToHabitat,
+  habitatForUser,
+  habitatHeight,
+  type AvatarHabitat,
+} from '../shared/avatar-habitats.js';
 import { MonsterAvatar, MonsterStates } from './monster-avatar-component.js';
 import { ViewerAvatar } from './viewer-avatar-component.js';
 
@@ -93,6 +99,7 @@ interface AvatarRuntime {
   destinationZ: number;
   nextDecisionAt: number;
   autonomySequence: number;
+  habitat: AvatarHabitat | null;
 }
 
 interface PaintImpact {
@@ -113,6 +120,15 @@ interface ReactionEffect {
 
 interface WelcomeNotice {
   sprite: Sprite;
+  shownAt: number;
+  expiresAt: number;
+}
+
+interface MomentNotice {
+  root: Group;
+  panel: Sprite;
+  stars: Mesh[];
+  materials: MeshBasicMaterial[];
   shownAt: number;
   expiresAt: number;
 }
@@ -173,6 +189,8 @@ export class ViewerAvatarSystem extends createSystem({
   private readonly shoutoutTracker = new ShoutoutTracker();
   private readonly shoutoutEffects: ShoutoutEffect[] = [];
   private welcomeNotice: WelcomeNotice | null = null;
+  private momentNotice: MomentNotice | null = null;
+  private readonly seenMomentIds = new Set<string>();
   private currentTime = 0;
 
   init(): void {
@@ -222,9 +240,18 @@ export class ViewerAvatarSystem extends createSystem({
       (message) => this.messageQueue.push(message),
       (status) => this.setSocketStatus(status),
     );
+    const onChallengeCompleted = (event: Event): void => {
+      const challengeId = event instanceof CustomEvent ? event.detail?.challengeId : null;
+      if (typeof challengeId === 'string') {
+        this.socket.send({ type: 'challenge.completed', challengeId });
+      }
+    };
+    window.addEventListener('holohangout:challenge-completed', onChallengeCompleted);
     this.cleanupFuncs.push(() => {
+      window.removeEventListener('holohangout:challenge-completed', onChallengeCompleted);
       this.socket.close();
       this.removeWelcomeNotice();
+      this.removeMomentNotice();
       for (const effect of [...this.reactionEffects]) this.removeReactionEffect(effect);
       for (const effect of [...this.shoutoutEffects]) this.removeShoutoutEffect(effect);
       this.shoutoutTracker.clear();
@@ -251,6 +278,7 @@ export class ViewerAvatarSystem extends createSystem({
     }
     this.updateReactionEffects(time);
     this.updateWelcomeNotice(time);
+    this.updateMomentNotice(time);
     this.updateShoutoutEffects(time);
     for (const userId of this.shoutoutTracker.update(time)) {
       this.createShoutoutCelebration(userId, time);
@@ -311,6 +339,7 @@ export class ViewerAvatarSystem extends createSystem({
       destinationZ: object.position.z,
       nextDecisionAt: 0,
       autonomySequence: 0,
+      habitat: null,
     });
   }
 
@@ -326,10 +355,15 @@ export class ViewerAvatarSystem extends createSystem({
         this.showBubble(message.userId, message.text, time);
         break;
       case 'viewer.welcome':
-        this.showWelcomeNotice(message.displayName, time);
+        this.showWelcomeNotice(message.displayName, message.monsterName, time);
         break;
       case 'avatar.reaction':
         this.showReaction(message.userId, message.reaction, time);
+        break;
+      case 'avatar.blast':
+        window.dispatchEvent(new CustomEvent('holohangout:viewer-blast', {
+          detail: { userId: message.userId, blastSequence: message.blastSequence },
+        }));
         break;
       case 'avatar.action':
         this.applyAction(message.userId, message.behavior, message.actionSequence, message.targetX, message.targetZ, time);
@@ -349,6 +383,9 @@ export class ViewerAvatarSystem extends createSystem({
       case 'community.leaderboard':
         this.communityEntries = message.entries;
         this.renderLeaderboard();
+        break;
+      case 'hangout.moment':
+        this.showMomentNotice(message.clipId, time);
         break;
     }
   }
@@ -381,6 +418,7 @@ export class ViewerAvatarSystem extends createSystem({
     entity.setValue(ViewerAvatar, 'actionSequence', participant.actionSequence);
     entity.setValue(ViewerAvatar, 'targetX', participant.targetX);
     entity.setValue(ViewerAvatar, 'targetZ', participant.targetZ);
+    runtime.habitat = participant.isBot ? habitatForUser(participant.userId) : null;
 
     const monster = monsterByType(participant.monsterType);
     this.mountMonster(runtime, monster);
@@ -492,6 +530,11 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.commandQueue = [...command.clips];
     runtime.commandQueueIndex = 0;
     runtime.commandMoves = command.moves;
+    if (command.moves && runtime.habitat != null) {
+      const destination = this.pickDestination(runtime);
+      runtime.destinationX = destination.x;
+      runtime.destinationZ = destination.z;
+    }
     runtime.commandStartedAt = time;
     runtime.commandDuration = runtime.commandQueue.reduce(
       (duration, name) => duration + (runtime.clips.get(name)?.duration ?? 0),
@@ -544,6 +587,7 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.activeClip = '';
     runtime.commandBehavior = null;
     runtime.moving = false;
+    runtime.habitat = null;
     entity.object3D.visible = false;
     entity.object3D.scale.setScalar(1);
     entity.setValue(ViewerAvatar, 'userId', '');
@@ -670,6 +714,15 @@ export class ViewerAvatarSystem extends createSystem({
   }
 
   private pickRespawnPosition(runtime: AvatarRuntime): { x: number; z: number } {
+    if (runtime.habitat != null) {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const candidate = this.habitatPoint(runtime, runtime.lastHitSequence * 17 + attempt);
+        if (Math.hypot(candidate.x - runtime.hitOriginX, candidate.z - runtime.hitOriginZ) >= 0.1) {
+          return candidate;
+        }
+      }
+      return { x: runtime.habitat.centerX, z: runtime.habitat.centerZ };
+    }
     for (let attempt = 0; attempt < 14; attempt += 1) {
       const sequence = runtime.lastHitSequence * 17 + attempt;
       const candidate = {
@@ -736,8 +789,12 @@ export class ViewerAvatarSystem extends createSystem({
     const behavior = runtime.commandBehavior;
     if (behavior == null) return;
     if (runtime.commandMoves) {
-      const targetX = entity.getValue(ViewerAvatar, 'targetX') ?? runtime.destinationX;
-      const targetZ = entity.getValue(ViewerAvatar, 'targetZ') ?? runtime.destinationZ;
+      const targetX = runtime.habitat == null
+        ? entity.getValue(ViewerAvatar, 'targetX') ?? runtime.destinationX
+        : runtime.destinationX;
+      const targetZ = runtime.habitat == null
+        ? entity.getValue(ViewerAvatar, 'targetZ') ?? runtime.destinationZ
+        : runtime.destinationZ;
       const speed = behavior === AvatarBehaviors.Walk ? 0.1 : behavior === AvatarBehaviors.Fly ? 0.25 : 0.2;
       if (this.moveToward(runtime, targetX, targetZ, speed, delta)) {
         entity.setValue(ViewerAvatar, 'behavior', AvatarBehaviors.Idle);
@@ -792,6 +849,9 @@ export class ViewerAvatarSystem extends createSystem({
   }
 
   private pickDestination(runtime: AvatarRuntime): { x: number; z: number } {
+    if (runtime.habitat != null) {
+      return this.habitatPoint(runtime, runtime.autonomySequence * 11 + 1);
+    }
     let candidate = { x: runtime.initialX, z: runtime.initialZ };
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const sequence = runtime.autonomySequence * 11 + attempt;
@@ -812,6 +872,9 @@ export class ViewerAvatarSystem extends createSystem({
   }
 
   private pickSpawnPosition(runtime: AvatarRuntime): { x: number; z: number } {
+    if (runtime.habitat != null) {
+      return this.habitatPoint(runtime, runtime.entity.index * 37 + 1);
+    }
     let fallback = { x: runtime.initialX, z: runtime.initialZ };
     for (let attempt = 0; attempt < 24; attempt += 1) {
       const sequence = runtime.entity.index * 37 + attempt + 1;
@@ -844,13 +907,26 @@ export class ViewerAvatarSystem extends createSystem({
   ): boolean {
     const object = runtime.entity.object3D;
     if (object == null) return true;
-    const dx = targetX - object.position.x;
-    const dz = targetZ - object.position.z;
+    const target = runtime.habitat == null
+      ? { x: targetX, z: targetZ }
+      : clampToHabitat(runtime.habitat, targetX, targetZ);
+    const dx = target.x - object.position.x;
+    const dz = target.z - object.position.z;
     const distance = Math.hypot(dx, dz);
     if (distance < 0.008) return true;
     const step = Math.min(distance, speed * Math.min(delta, 1 / 15));
-    object.position.x = clamp(object.position.x + (dx / distance) * step, TABLE_MIN_X, TABLE_MAX_X);
-    object.position.z = clamp(object.position.z + (dz / distance) * step, TABLE_MIN_Z, TABLE_MAX_Z);
+    const next = runtime.habitat == null
+      ? {
+          x: clamp(object.position.x + (dx / distance) * step, TABLE_MIN_X, TABLE_MAX_X),
+          z: clamp(object.position.z + (dz / distance) * step, TABLE_MIN_Z, TABLE_MAX_Z),
+        }
+      : clampToHabitat(
+          runtime.habitat,
+          object.position.x + (dx / distance) * step,
+          object.position.z + (dz / distance) * step,
+        );
+    object.position.x = next.x;
+    object.position.z = next.z;
     const targetRotation = Math.atan2(dx, dz);
     const difference = Math.atan2(Math.sin(targetRotation - object.rotation.y), Math.cos(targetRotation - object.rotation.y));
     object.rotation.y += difference * Math.min(1, delta * 7);
@@ -892,14 +968,17 @@ export class ViewerAvatarSystem extends createSystem({
   }
 
   private restingY(runtime: AvatarRuntime, time: number): number {
+    const baseY = runtime.habitat == null
+      ? runtime.initialY
+      : habitatHeight(runtime.habitat, time);
     const category = runtime.monster?.category;
     if (category === MonsterCategories.Flying) {
-      return runtime.initialY + 0.06 + Math.sin(time * 2.4 + runtime.entity.index) * 0.006;
+      return baseY + 0.06 + Math.sin(time * 2.4 + runtime.entity.index) * 0.006;
     }
     if (category === MonsterCategories.Blob) {
-      return runtime.initialY + Math.sin(time * 2.1 + runtime.entity.index) * 0.002;
+      return baseY + Math.sin(time * 2.1 + runtime.entity.index) * 0.002;
     }
-    return runtime.initialY;
+    return baseY;
   }
 
   private animateFallback(entity: Entity, runtime: AvatarRuntime, delta: number, time: number): void {
@@ -913,16 +992,16 @@ export class ViewerAvatarSystem extends createSystem({
       const targetX = entity.getValue(ViewerAvatar, 'targetX') ?? object.position.x;
       const targetZ = entity.getValue(ViewerAvatar, 'targetZ') ?? object.position.z;
       this.moveToward(runtime, targetX, targetZ, behavior === AvatarBehaviors.Walk ? 0.1 : 0.2, delta);
-      object.position.y = runtime.initialY + Math.abs(Math.sin(elapsed * 13)) * 0.008;
+      object.position.y = this.restingY(runtime, time) + Math.abs(Math.sin(elapsed * 13)) * 0.008;
     } else if (behavior === AvatarBehaviors.Wave && runtime.rightArm != null) {
       runtime.rightArm.rotation.z = -1.8 + Math.sin(elapsed * 12) * 0.35;
     } else if (behavior === AvatarBehaviors.Dance) {
       object.rotation.z = Math.sin(elapsed * 7) * 0.28;
       object.rotation.y = Math.sin(elapsed * 3.5) * 0.45;
     } else if (behavior === AvatarBehaviors.Jump) {
-      object.position.y = runtime.initialY + Math.sin(Math.min(1, elapsed / 1.05) * Math.PI) * 0.09;
+      object.position.y = this.restingY(runtime, time) + Math.sin(Math.min(1, elapsed / 1.05) * Math.PI) * 0.09;
     } else {
-      object.position.y = runtime.initialY + Math.sin(time * 2.1 + entity.index) * 0.0025;
+      object.position.y = this.restingY(runtime, time);
     }
   }
 
@@ -930,11 +1009,28 @@ export class ViewerAvatarSystem extends createSystem({
     const runtime = this.runtimes.get(entity);
     const object = entity.object3D;
     if (runtime == null || object == null || !object.visible) return;
-    object.position.x = clamp(object.position.x, TABLE_MIN_X, TABLE_MAX_X);
-    object.position.z = clamp(object.position.z, TABLE_MIN_Z, TABLE_MAX_Z);
+    const settled = runtime.habitat == null
+      ? {
+          x: clamp(object.position.x, TABLE_MIN_X, TABLE_MAX_X),
+          z: clamp(object.position.z, TABLE_MIN_Z, TABLE_MAX_Z),
+        }
+      : clampToHabitat(runtime.habitat, object.position.x, object.position.z);
+    object.position.x = settled.x;
+    object.position.z = settled.z;
     object.position.y = this.restingY(runtime, this.currentTime);
     object.rotation.x = 0;
     object.rotation.z = 0;
+  }
+
+  private habitatPoint(runtime: AvatarRuntime, sequence: number): { x: number; z: number } {
+    const habitat = runtime.habitat;
+    if (habitat == null) return { x: runtime.initialX, z: runtime.initialZ };
+    const angle = seededUnit(runtime.entity.index + 101, sequence) * Math.PI * 2;
+    const radius = Math.sqrt(seededUnit(runtime.entity.index + 151, sequence)) * habitat.radius * 0.78;
+    return {
+      x: habitat.centerX + Math.cos(angle) * radius,
+      z: habitat.centerZ + Math.sin(angle) * radius,
+    };
   }
 
   private applyColor(root: Object3D, colorHex: string): void {
@@ -1083,7 +1179,7 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.bubbleExpiresAt = 0;
   }
 
-  private showWelcomeNotice(displayName: string, time: number): void {
+  private showWelcomeNotice(displayName: string, monsterName: string, time: number): void {
     const parent = this.slots[0]?.object3D?.parent;
     if (parent == null) return;
     this.removeWelcomeNotice();
@@ -1105,21 +1201,16 @@ export class ViewerAvatarSystem extends createSystem({
 
     let fontSize = 56;
     context.font = `800 ${fontSize}px system-ui, sans-serif`;
-    const prefix = 'Welcome, ';
-    const suffix = '!';
-    let totalWidth = context.measureText(`${prefix}${displayName}${suffix}`).width;
+    const suffix = ` joined as ${monsterName}!`;
+    let totalWidth = context.measureText(`${displayName}${suffix}`).width;
     if (totalWidth > 680) fontSize = Math.max(38, fontSize * (680 / totalWidth));
     context.font = `800 ${fontSize}px system-ui, sans-serif`;
-    const prefixWidth = context.measureText(prefix).width;
     const nameWidth = context.measureText(displayName).width;
     const suffixWidth = context.measureText(suffix).width;
-    totalWidth = prefixWidth + nameWidth + suffixWidth;
+    totalWidth = nameWidth + suffixWidth;
     let x = (canvas.width - totalWidth) / 2;
     context.textAlign = 'left';
     context.textBaseline = 'middle';
-    context.fillStyle = '#2C3434';
-    context.fillText(prefix, x, 90);
-    x += prefixWidth;
     context.fillStyle = '#C94F78';
     context.fillText(displayName, x, 90);
     x += nameWidth;
@@ -1161,6 +1252,118 @@ export class ViewerAvatarSystem extends createSystem({
     notice.sprite.material.map?.dispose();
     notice.sprite.material.dispose();
     this.welcomeNotice = null;
+  }
+
+  private showMomentNotice(clipId: string, time: number): void {
+    if (!clipId || this.seenMomentIds.has(clipId)) return;
+    this.seenMomentIds.add(clipId);
+    if (this.seenMomentIds.size > 50) {
+      const oldest = this.seenMomentIds.values().next().value as string | undefined;
+      if (oldest != null) this.seenMomentIds.delete(oldest);
+    }
+    this.removeMomentNotice();
+    const canvas = document.createElement('canvas');
+    canvas.width = 900;
+    canvas.height = 380;
+    const context = canvas.getContext('2d');
+    if (context == null) return;
+    context.shadowColor = 'rgba(39, 20, 50, 0.25)';
+    context.shadowBlur = 24;
+    context.fillStyle = 'rgba(255, 249, 240, 0.98)';
+    context.beginPath();
+    context.roundRect(24, 24, 852, 332, 72);
+    context.fill();
+    context.shadowColor = 'transparent';
+    context.strokeStyle = '#9146FF';
+    context.lineWidth = 9;
+    context.stroke();
+    context.fillStyle = '#9146FF';
+    context.fillRect(76, 79, 116, 82);
+    context.fillStyle = '#FFF9F0';
+    context.fillRect(92, 99, 84, 42);
+    context.strokeStyle = '#9146FF';
+    context.lineWidth = 12;
+    context.beginPath();
+    context.moveTo(74, 76);
+    context.lineTo(188, 40);
+    context.stroke();
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillStyle = '#6A35B5';
+    context.font = '900 40px system-ui, sans-serif';
+    context.fillText('HANGOUT MOMENT', 520, 86);
+    context.fillStyle = '#2C3434';
+    context.font = '900 76px system-ui, sans-serif';
+    context.fillText('Moment Clipped!', 450, 190);
+    context.fillStyle = '#695F6D';
+    context.font = '700 40px system-ui, sans-serif';
+    context.fillText('One for the highlight reel!', 450, 278);
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.minFilter = LinearFilter;
+    const panel = new Sprite(new SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      opacity: 0,
+    }));
+    panel.name = 'Hangout Moment Verified Notification';
+    panel.scale.set(0.54, 0.228, 1);
+    panel.renderOrder = 45;
+    const root = new Group();
+    root.name = 'Hangout Moment Celebration';
+    root.position.set(0, 0.27, -0.88);
+    root.scale.setScalar(0.001);
+    root.add(panel);
+    const materials: MeshBasicMaterial[] = [];
+    const stars = Array.from({ length: 10 }, (_, index) => {
+      const material = new MeshBasicMaterial({
+        color: index % 3 === 0 ? '#FFF1A8' : '#FFD35A',
+        transparent: true,
+        opacity: 0,
+        depthTest: false,
+      });
+      materials.push(material);
+      const star = new Mesh(shoutoutStarGeometry, material);
+      const angle = (index / 10) * Math.PI * 2;
+      star.position.set(Math.cos(angle) * 0.34, Math.sin(angle) * 0.17, 0.01);
+      star.scale.setScalar(0.025 + (index % 2) * 0.008);
+      star.renderOrder = 46;
+      root.add(star);
+      return star;
+    });
+    this.world.player.head.add(root);
+    this.momentNotice = { root, panel, stars, materials, shownAt: time, expiresAt: time + 3.8 };
+  }
+
+  private updateMomentNotice(time: number): void {
+    const notice = this.momentNotice;
+    if (notice == null) return;
+    if (time >= notice.expiresAt) {
+      this.removeMomentNotice();
+      return;
+    }
+    const elapsed = time - notice.shownAt;
+    const appear = clamp(elapsed / 0.28, 0, 1);
+    const fade = elapsed < 2.8 ? 1 : clamp((notice.expiresAt - time) / 1, 0, 1);
+    notice.root.position.y = 0.27 + clamp(elapsed / 3.8, 0, 1) * 0.055;
+    notice.root.scale.setScalar((0.88 + elasticOut(appear) * 0.12) * fade);
+    notice.panel.material.opacity = Math.min(appear, fade);
+    notice.stars.forEach((star, index) => {
+      star.rotation.x = elapsed * (0.8 + index * 0.06);
+      star.rotation.y = elapsed * (1.1 + index * 0.04);
+      (star.material as MeshBasicMaterial).opacity = Math.min(appear, fade) * 0.9;
+    });
+  }
+
+  private removeMomentNotice(): void {
+    const notice = this.momentNotice;
+    if (notice == null) return;
+    notice.root.removeFromParent();
+    notice.panel.material.map?.dispose();
+    notice.panel.material.dispose();
+    for (const material of notice.materials) material.dispose();
+    this.momentNotice = null;
   }
 
   private showReaction(userId: string, reaction: ReactionType, time: number): void {

@@ -42,6 +42,7 @@ interface EventSubEnvelope {
 export interface TwitchStatus {
   connected: boolean;
   broadcasterLogin: string | null;
+  clipsAuthorized: boolean;
   error: string | null;
 }
 
@@ -58,6 +59,7 @@ export class TwitchEventSub {
   private stopped = false;
   private lastError: string | null = null;
   private keepaliveSeconds = 30;
+  private readonly scopes = new Set<string>();
 
   constructor(
     private readonly config: TwitchConfig,
@@ -71,7 +73,7 @@ export class TwitchEventSub {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', this.config.clientId);
     url.searchParams.set('redirect_uri', this.config.redirectUri);
-    url.searchParams.set('scope', 'user:read:chat user:write:chat');
+    url.searchParams.set('scope', 'user:read:chat user:write:chat clips:edit');
     url.searchParams.set('state', state);
     return url.toString();
   }
@@ -103,6 +105,7 @@ export class TwitchEventSub {
       expires_in: number;
     };
     const validation = await this.validate(result.access_token);
+    this.setScopes(validation.scopes);
     this.token = {
       accessToken: result.access_token,
       refreshToken: result.refresh_token,
@@ -126,6 +129,7 @@ export class TwitchEventSub {
       await this.refresh();
     } else {
       const validation = await this.validate(token.accessToken);
+      this.setScopes(validation.scopes);
       this.token.userId = validation.user_id;
       this.token.login = validation.login;
     }
@@ -138,7 +142,59 @@ export class TwitchEventSub {
     return {
       connected: this.socket?.readyState === WebSocket.OPEN,
       broadcasterLogin: this.token?.login ?? null,
+      clipsAuthorized: this.clipsAuthorized(),
       error: this.lastError,
+    };
+  }
+
+  clipsAuthorized(): boolean {
+    return this.scopes.has('clips:edit');
+  }
+
+  async isBroadcasterLive(): Promise<boolean> {
+    const token = await this.currentToken();
+    const url = new URL('https://api.twitch.tv/helix/streams');
+    url.searchParams.set('user_id', token.userId);
+    const response = await fetch(url, { headers: this.helixHeaders(token) });
+    if (!response.ok) throw new Error(`Twitch live-status check failed (${response.status}).`);
+    const result = (await response.json()) as { data?: unknown[] };
+    return (result.data?.length ?? 0) > 0;
+  }
+
+  async createClip(title: string, duration: number): Promise<{ id: string }> {
+    if (!this.clipsAuthorized()) throw new Error('Reconnect Twitch to grant clips:edit.');
+    const token = await this.currentToken();
+    const url = new URL('https://api.twitch.tv/helix/clips');
+    url.searchParams.set('broadcaster_id', token.userId);
+    url.searchParams.set('title', title.slice(0, 100));
+    url.searchParams.set('duration', String(Math.max(5, Math.min(60, duration))));
+    const response = await fetch(url, { method: 'POST', headers: this.helixHeaders(token) });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Twitch clip creation failed (${response.status}): ${detail}`);
+    }
+    const result = (await response.json()) as { data?: Array<{ id?: string }> };
+    const id = result.data?.[0]?.id;
+    if (!id) throw new Error('Twitch accepted the clip request without returning a clip ID.');
+    return { id };
+  }
+
+  async getClip(id: string): Promise<{ id: string; url: string; title: string; createdAt: string } | null> {
+    const token = await this.currentToken();
+    const url = new URL('https://api.twitch.tv/helix/clips');
+    url.searchParams.set('id', id);
+    const response = await fetch(url, { headers: this.helixHeaders(token) });
+    if (!response.ok) throw new Error(`Twitch clip verification failed (${response.status}).`);
+    const result = (await response.json()) as {
+      data?: Array<{ id?: string; url?: string; title?: string; created_at?: string }>;
+    };
+    const clip = result.data?.[0];
+    if (!clip?.id || !clip.url) return null;
+    return {
+      id: clip.id,
+      url: clip.url,
+      title: clip.title ?? 'HoloHangout Moment',
+      createdAt: clip.created_at ?? new Date().toISOString(),
     };
   }
 
@@ -180,7 +236,7 @@ export class TwitchEventSub {
     socket.on('close', () => {
       if (socket !== this.socket || this.stopped) return;
       this.socket = null;
-      this.onStatus({ connected: false, broadcasterLogin: this.token?.login ?? null, error: null });
+      this.onStatus(this.status());
       this.scheduleReconnect();
     });
   }
@@ -203,7 +259,7 @@ export class TwitchEventSub {
         this.armKeepalive(this.keepaliveSeconds);
         if (!transferred) await this.subscribe(session.id);
         this.lastError = null;
-        this.onStatus({ connected: true, broadcasterLogin: this.token?.login ?? null, error: null });
+        this.onStatus(this.status());
         break;
       }
       case 'session_keepalive':
@@ -225,11 +281,7 @@ export class TwitchEventSub {
       }
       case 'revocation':
         this.lastError = 'Twitch revoked the chat subscription. Reauthorize ChatIRL.';
-        this.onStatus({
-          connected: false,
-          broadcasterLogin: this.token?.login ?? null,
-          error: this.lastError,
-        });
+        this.onStatus(this.status());
         break;
     }
   }
@@ -312,7 +364,8 @@ export class TwitchEventSub {
     if (this.token == null) return;
     try {
       try {
-        await this.validate(this.token.accessToken);
+        const validation = await this.validate(this.token.accessToken);
+        this.setScopes(validation.scopes);
       } catch {
         await this.refresh();
       }
@@ -341,7 +394,8 @@ export class TwitchEventSub {
       refresh_token: string;
       expires_in: number;
     };
-    await this.validate(result.access_token);
+    const validation = await this.validate(result.access_token);
+    this.setScopes(validation.scopes);
     token.accessToken = result.access_token;
     token.refreshToken = result.refresh_token;
     token.expiresAt = Date.now() + result.expires_in * 1000;
@@ -378,7 +432,7 @@ export class TwitchEventSub {
   private reportError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     this.lastError = message;
-    this.onStatus({ connected: false, broadcasterLogin: this.token?.login ?? null, error: message });
+    this.onStatus(this.status());
   }
 
   private drainOutboundMessages(): void {
@@ -414,6 +468,25 @@ export class TwitchEventSub {
       const detail = await response.text();
       console.error(`Twitch welcome message failed (${response.status}): ${detail}`);
     }
+  }
+
+  private setScopes(scopes: string[]): void {
+    this.scopes.clear();
+    for (const scope of scopes) this.scopes.add(scope);
+  }
+
+  private async currentToken(): Promise<TwitchToken> {
+    if (this.token == null) throw new Error('Connect Twitch before creating a Hangout Moment.');
+    if (this.token.expiresAt <= Date.now() + 30_000) await this.refresh();
+    if (this.token == null) throw new Error('Twitch authorization is unavailable.');
+    return this.token;
+  }
+
+  private helixHeaders(token: TwitchToken): Record<string, string> {
+    return {
+      Authorization: `Bearer ${token.accessToken}`,
+      'Client-Id': this.config.clientId,
+    };
   }
 
   private clearTimers(): void {

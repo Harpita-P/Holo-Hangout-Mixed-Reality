@@ -10,6 +10,10 @@ import { createViewerAvatar } from './scene-assets/viewer-avatar.scene-asset.js'
 export default defineAssets({
   'chatirl-tabletop': createOrganicTabletop(),
   'chatirl-floating-island': createFloatingTerrainIsland(),
+  'chatirl-floating-island-mint': createFloatingTerrainIsland('#76B991'),
+  'chatirl-floating-island-bright': createFloatingTerrainIsland('#55A84F'),
+  'chatirl-floating-island-sage': createFloatingTerrainIsland('#65906A'),
+  'chatirl-floating-island-pastel': createFloatingTerrainIsland('#83B86E'),
   'chatirl-cube': createValidationCube(),
   'chatirl-paintball-blaster': createPaintballBlaster(),
   'viewer-avatar': createViewerAvatar(),

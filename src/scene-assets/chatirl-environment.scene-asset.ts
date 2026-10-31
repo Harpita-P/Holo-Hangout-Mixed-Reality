@@ -40,6 +40,8 @@ const deepGrass = new MeshStandardMaterial({
   roughness: 0.9,
   metalness: 0,
 });
+const mintGrass = new MeshStandardMaterial({ color: '#77B96B', roughness: 0.88, metalness: 0 });
+const sageGrass = new MeshStandardMaterial({ color: '#5D9660', roughness: 0.9, metalness: 0 });
 const floatingStone = new MeshStandardMaterial({
   color: '#6D5946',
   roughness: 0.96,
@@ -71,7 +73,12 @@ function islandOutline(): Shape {
   return shape;
 }
 
-function terrainChunk(shape: Shape, depth: number, name: string): Mesh {
+function terrainChunk(
+  shape: Shape,
+  depth: number,
+  name: string,
+  topMaterial: MeshStandardMaterial = grass,
+): Mesh {
   const mesh = new Mesh(
     new ExtrudeGeometry(shape, {
       depth,
@@ -82,7 +89,7 @@ function terrainChunk(shape: Shape, depth: number, name: string): Mesh {
       curveSegments: 5,
       steps: 1,
     }),
-    [grass, earth],
+    [topMaterial, earth],
   );
   mesh.name = name;
   mesh.rotation.x = Math.PI / 2;
@@ -163,12 +170,22 @@ export function createOrganicTabletop(): Object3D {
       lightGrass,
       'North Light Grass Patch',
     ),
+    surfacePatch(
+      [[-0.08, 0.18], [0.2, 0.15], [0.34, 0.3], [0.18, 0.43], [-0.12, 0.37]],
+      mintGrass,
+      'Central Mint Grass Patch',
+    ),
+    surfacePatch(
+      [[-0.76, 0.02], [-0.55, -0.05], [-0.38, 0.08], [-0.46, 0.22], [-0.71, 0.2]],
+      sageGrass,
+      'West Sage Grass Patch',
+    ),
   );
   return root;
 }
 
 /** 54 × 40 cm reusable floating terrain chunk; top contact plane is local Y=0. */
-export function createFloatingTerrainIsland(): Object3D {
+export function createFloatingTerrainIsland(topColor = '#438F43'): Object3D {
   const root = new Group();
   root.name = 'ChatIRL Floating Terrain Island';
   const underside = new Mesh(
@@ -181,6 +198,11 @@ export function createFloatingTerrainIsland(): Object3D {
   underside.rotation.y = 0.18;
   underside.castShadow = true;
   underside.receiveShadow = true;
-  root.add(terrainChunk(islandOutline(), 0.045, 'Floating Organic Island'), underside);
+  const islandGrass = new MeshStandardMaterial({
+    color: topColor,
+    roughness: 0.88,
+    metalness: 0,
+  });
+  root.add(terrainChunk(islandOutline(), 0.045, 'Floating Organic Island', islandGrass), underside);
   return root;
 }

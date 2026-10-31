@@ -52,8 +52,9 @@ export type ServerMessage =
     }
   | { type: 'avatar.join'; participant: ParticipantSnapshot }
   | { type: 'avatar.chat'; userId: string; text: string }
-  | { type: 'viewer.welcome'; userId: string; displayName: string }
+  | { type: 'viewer.welcome'; userId: string; displayName: string; monsterName: string }
   | { type: 'avatar.reaction'; userId: string; reaction: ReactionType }
+  | { type: 'avatar.blast'; userId: string; blastSequence: number }
   | {
       type: 'avatar.action';
       userId: string;
@@ -65,6 +66,7 @@ export type ServerMessage =
   | { type: 'avatar.leave'; userId: string; deadlineMs: number }
   | { type: 'avatar.removed'; userId: string }
   | { type: 'community.leaderboard'; entries: CommunityLeaderboardEntry[] }
+  | { type: 'hangout.moment'; clipId: string }
   | {
       type: 'server.status';
       twitchConnected: boolean;
@@ -73,7 +75,8 @@ export type ServerMessage =
 
 export type ClientMessage =
   | { type: 'client.ready' }
-  | { type: 'avatar.held'; userId: string; held: boolean };
+  | { type: 'avatar.held'; userId: string; held: boolean }
+  | { type: 'challenge.completed'; challengeId: string };
 
 export function isClientMessage(value: unknown): value is ClientMessage {
   if (typeof value !== 'object' || value === null || !('type' in value)) {
@@ -82,6 +85,9 @@ export function isClientMessage(value: unknown): value is ClientMessage {
   const candidate = value as Record<string, unknown>;
   if (candidate.type === 'client.ready') {
     return true;
+  }
+  if (candidate.type === 'challenge.completed') {
+    return typeof candidate.challengeId === 'string' && candidate.challengeId.length <= 100;
   }
   return (
     candidate.type === 'avatar.held' &&

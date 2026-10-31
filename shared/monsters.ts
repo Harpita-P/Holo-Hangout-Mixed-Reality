@@ -121,6 +121,7 @@ export function supportedCommands(type: MonsterType): string[] {
     '!support',
     '!like',
     '!fire',
+    '!blast',
     '!leave',
   ];
 }

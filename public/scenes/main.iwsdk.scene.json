@@ -61,15 +61,15 @@
         {
           "id": "terrain-island-west",
           "name": "West Floating Terrain Island",
-          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true, "receiveShadow": true },
+          "content": { "type": "asset", "asset": "chatirl-floating-island-mint", "castShadow": true, "receiveShadow": true },
           "transform": { "position": [-1.12, 0.18, -0.16], "rotationDeg": [0, 18, 0], "scale": [0.76, 0.76, 0.76] },
           "components": { "FloatingTerrain": { "amplitude": 0.012, "speed": 0.72, "phase": 0.3 } },
           "children": [
             {
               "id": "island-west-pink-tree",
-              "name": "West Island Pink Spiral Tree",
-              "content": { "type": "asset", "asset": "environment-tree-spiral-1", "castShadow": true },
-              "transform": { "position": [-0.03, 0.004, -0.01], "rotationDeg": [0, 30, 0], "scale": [0.038, 0.038, 0.038] }
+              "name": "West Island Light Blue Blob Tree",
+              "content": { "type": "asset", "asset": "environment-tree-blob-2", "castShadow": true },
+              "transform": { "position": [-0.055, 0.004, -0.025], "rotationDeg": [0, 38, 0], "scale": [0.034, 0.034, 0.034] }
             },
             {
               "id": "island-west-rock",
@@ -86,9 +86,15 @@
           ]
         },
         {
+          "id": "ambient-bee-west",
+          "name": "Ambient Bee — West Island",
+          "transform": { "position": [-1.12, 0.18, -0.16], "scale": [1, 1, 1] },
+          "components": { "IslandBee": { "radius": 0.11, "hoverHeight": 0.23, "phase": 0.4 } }
+        },
+        {
           "id": "terrain-island-east",
           "name": "East Floating Terrain Island",
-          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true, "receiveShadow": true },
+          "content": { "type": "asset", "asset": "chatirl-floating-island-bright", "castShadow": true, "receiveShadow": true },
           "transform": { "position": [1.12, 0.105, -0.08], "rotationDeg": [0, -28, 0], "scale": [0.82, 0.82, 0.82] },
           "components": { "FloatingTerrain": { "amplitude": 0.009, "speed": 0.88, "phase": 2.1 } },
           "children": [
@@ -115,15 +121,15 @@
         {
           "id": "terrain-island-south",
           "name": "South Floating Terrain Island",
-          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true, "receiveShadow": true },
+          "content": { "type": "asset", "asset": "chatirl-floating-island-sage", "castShadow": true, "receiveShadow": true },
           "transform": { "position": [0.18, 0.145, 0.82], "rotationDeg": [0, 42, 0], "scale": [0.68, 0.68, 0.68] },
           "components": { "FloatingTerrain": { "amplitude": 0.014, "speed": 0.64, "phase": 4.2 } },
           "children": [
             {
               "id": "island-south-tree",
-              "name": "South Island Blob Tree",
-              "content": { "type": "asset", "asset": "environment-tree-blob-1", "castShadow": true },
-              "transform": { "position": [-0.04, 0.004, -0.01], "rotationDeg": [0, 14, 0], "scale": [0.038, 0.038, 0.038] }
+              "name": "South Island Light Blue Blob Tree",
+              "content": { "type": "asset", "asset": "environment-tree-blob-2", "castShadow": true },
+              "transform": { "position": [-0.07, 0.004, -0.025], "rotationDeg": [0, -11, 0], "scale": [0.03, 0.03, 0.03] }
             },
             {
               "id": "island-south-rock",
@@ -140,9 +146,15 @@
           ]
         },
         {
+          "id": "ambient-bee-south",
+          "name": "Ambient Bee — South Island",
+          "transform": { "position": [0.18, 0.145, 0.82], "scale": [1, 1, 1] },
+          "components": { "IslandBee": { "radius": 0.09, "hoverHeight": 0.26, "phase": 3.2 } }
+        },
+        {
           "id": "terrain-island-north-far",
           "name": "North Far Floating Terrain Island",
-          "content": { "type": "asset", "asset": "chatirl-floating-island", "castShadow": true, "receiveShadow": true },
+          "content": { "type": "asset", "asset": "chatirl-floating-island-pastel", "castShadow": true, "receiveShadow": true },
           "transform": { "position": [-0.62, 0.27, -0.88], "rotationDeg": [0, -14, 0], "scale": [0.62, 0.62, 0.62] },
           "components": { "FloatingTerrain": { "amplitude": 0.011, "speed": 0.76, "phase": 1.35 } },
           "children": [

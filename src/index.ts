@@ -3,6 +3,7 @@ import projectOptions from 'virtual:iwsdk-project';
 import { ViewerAvatarSystem } from './viewer-avatar-system.js';
 import { PaintballBlasterSystem } from './paintball-blaster-system.js';
 import { FloatingTerrainSystem } from './floating-terrain-system.js';
+import { IslandBeeSystem } from './island-bee-system.js';
 
 const container = document.getElementById('scene-container');
 
@@ -15,6 +16,7 @@ World.create(container, projectOptions)
     world.registerSystem(ViewerAvatarSystem);
     world.registerSystem(PaintballBlasterSystem);
     world.registerSystem(FloatingTerrainSystem);
+    world.registerSystem(IslandBeeSystem);
   })
   .catch((error: unknown) => {
     console.error('Unable to start the ChatIRL WebXR experience.', error);

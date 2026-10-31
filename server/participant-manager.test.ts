@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ServerMessage } from '../shared/protocol.js';
+import { AvatarBehaviors, type ServerMessage } from '../shared/protocol.js';
 import { ParticipantManager } from './participant-manager.js';
 
 test('commands affect only the sending viewer', () => {
@@ -240,7 +240,7 @@ test('fresh real joins emit one welcome and callback while duplicates and bots d
   assert.deepEqual(joined, ['viewer-1']);
   assert.deepEqual(
     emitted.filter((message) => message.type === 'viewer.welcome'),
-    [{ type: 'viewer.welcome', userId: 'viewer-1', displayName: 'ViewerOne' }],
+    [{ type: 'viewer.welcome', userId: 'viewer-1', displayName: 'ViewerOne', monsterName: 'Chicken' }],
   );
   manager.clear();
 });
@@ -271,8 +271,21 @@ test('universal reactions are real-viewer only, cooldown protected, and scored',
   );
   assert.equal(manager.leaderboardMessage().entries[0]?.score, 2);
   assert.deepEqual(
-    manager.snapshot().find(({ userId }) => userId === 'viewer-1')?.supportedCommands.slice(-4),
-    ['!support', '!like', '!fire', '!leave'],
+    manager.snapshot().find(({ userId }) => userId === 'viewer-1')?.supportedCommands.slice(-5),
+    ['!support', '!like', '!fire', '!blast', '!leave'],
   );
+  manager.clear();
+});
+
+test('blast is real-viewer only and emits without changing avatar behavior', () => {
+  const emitted: ServerMessage[] = [];
+  const manager = new ParticipantManager({ emit: (message) => emitted.push(message) });
+  assert.equal(manager.handleChat({ userId: 'outsider', displayName: 'Outsider', text: '!blast' }), false);
+  assert.equal(manager.handleChat({ userId: 'viewer', displayName: 'Viewer', text: '!join' }), true);
+  assert.equal(manager.handleChat({ userId: 'viewer', displayName: 'Viewer', text: '!blast' }), true);
+  assert.equal(manager.handleChat({ userId: 'viewer', displayName: 'Viewer', text: '!blast' }), false);
+  const blasts = emitted.filter((message) => message.type === 'avatar.blast');
+  assert.deepEqual(blasts, [{ type: 'avatar.blast', userId: 'viewer', blastSequence: 1 }]);
+  assert.equal(manager.snapshot().find(({ userId }) => userId === 'viewer')?.behavior, AvatarBehaviors.Idle);
   manager.clear();
 });

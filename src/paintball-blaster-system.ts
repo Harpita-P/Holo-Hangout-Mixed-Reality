@@ -17,6 +17,7 @@ import {
 } from '@iwsdk/core';
 import { monsterByType, type MonsterType } from '../shared/monsters.js';
 import { AvatarBehaviors } from '../shared/protocol.js';
+import { battleWinner, segmentHitsSphere } from '../shared/blaster-battle.js';
 import { MonsterAvatar } from './monster-avatar-component.js';
 import { PaintballBlaster } from './paintball-blaster-component.js';
 import { ViewerAvatar } from './viewer-avatar-component.js';
@@ -28,6 +29,10 @@ const PROJECTILE_RANGE = 3;
 const ROUND_SECONDS = 60;
 const projectileGeometry = new SphereGeometry(0.026, 12, 8);
 const projectileMaterial = new MeshBasicMaterial({ color: '#FF3F9B' });
+const chatProjectileGeometry = new SphereGeometry(0.032, 12, 8);
+const chatProjectileMaterial = new MeshBasicMaterial({ color: '#32D9FF' });
+const CHAT_PROJECTILE_SPEED = 1.55;
+const CHAT_PROJECTILE_RANGE = 4;
 
 interface PaintballProjectile {
   mesh: Mesh;
@@ -45,6 +50,13 @@ interface HitPopup {
   startedAt: number;
 }
 
+interface ChatBlastProjectile {
+  mesh: Mesh;
+  previous: Vector3;
+  direction: Vector3;
+  distance: number;
+}
+
 export class PaintballBlasterSystem extends createSystem({
   blasters: { required: [PaintballBlaster] },
   heldBlasters: { required: [PaintballBlaster, Grabbed] },
@@ -59,25 +71,38 @@ export class PaintballBlasterSystem extends createSystem({
   private roundActive = false;
   private roundStartedAt = 0;
   private roundHits = 0;
+  private chatHits = 0;
+  private roundId: string | null = null;
+  private winnerMessage = '';
+  private winnerUntil = 0;
   private renderedSecond = -1;
   private hud: Sprite | null = null;
   private hudCanvas: HTMLCanvasElement | null = null;
   private hitPopupTexture: CanvasTexture | null = null;
   private readonly hitPopups: HitPopup[] = [];
+  private readonly chatProjectiles: ChatBlastProjectile[] = [];
   private readonly onSelect = (): void => this.fire();
   private readonly onSessionStart = (): void => this.bindSession();
+  private readonly onViewerBlast = (event: Event): void => {
+    const userId = event instanceof CustomEvent ? event.detail?.userId : null;
+    if (typeof userId === 'string') this.launchChatProjectile(userId);
+  };
 
   init(): void {
     this.world.renderer.xr.addEventListener('sessionstart', this.onSessionStart);
     this.bindSession();
     this.createHud();
+    window.addEventListener('holohangout:viewer-blast', this.onViewerBlast);
     const offPickup = this.queries.heldBlasters.subscribe('qualify', () => this.startRound());
     const offRelease = this.queries.heldBlasters.subscribe('disqualify', () => this.stopRound());
     this.cleanupFuncs.push(() => {
       this.world.renderer.xr.removeEventListener('sessionstart', this.onSessionStart);
+      window.removeEventListener('holohangout:viewer-blast', this.onViewerBlast);
       this.session?.removeEventListener('select', this.onSelect);
       for (const projectile of this.projectiles) projectile.mesh.removeFromParent();
       this.projectiles.length = 0;
+      for (const projectile of this.chatProjectiles) projectile.mesh.removeFromParent();
+      this.chatProjectiles.length = 0;
       this.disposeHud();
     });
     this.cleanupFuncs.push(offPickup, offRelease);
@@ -92,6 +117,7 @@ export class PaintballBlasterSystem extends createSystem({
       flash.scale.setScalar(progress > 0 ? 0.5 + progress : 0.001);
     }
     this.updateProjectiles(Math.min(delta, 1 / 15), time);
+    this.updateChatProjectiles(Math.min(delta, 1 / 15));
     this.updateHud(time);
     this.updateHitPopups(time);
   }
@@ -159,6 +185,72 @@ export class PaintballBlasterSystem extends createSystem({
     }
   }
 
+  private launchChatProjectile(userId: string): void {
+    const avatar = [...this.queries.avatars.entities].find(
+      (entity) => entity.getValue(ViewerAvatar, 'userId') === userId,
+    );
+    const object = avatar?.object3D;
+    if (
+      avatar == null ||
+      object == null ||
+      !object.visible ||
+      avatar.getValue(ViewerAvatar, 'behavior') === AvatarBehaviors.Leaving
+    ) return;
+    const monsterType = avatar.getValue(MonsterAvatar, 'monsterType');
+    const height = monsterType == null
+      ? 0.14
+      : monsterByType(monsterType as MonsterType).targetHeight;
+    object.updateWorldMatrix(true, false);
+    this.world.player.head.updateWorldMatrix(true, false);
+    const origin = object.localToWorld(new Vector3(0, height * 0.62, 0));
+    const target = this.world.player.head.getWorldPosition(new Vector3());
+    target.y -= 0.06;
+    const direction = target.sub(origin).normalize();
+    if (direction.lengthSq() === 0) return;
+    const mesh = new Mesh(chatProjectileGeometry, chatProjectileMaterial);
+    mesh.name = `Chat Cyan Blast — ${userId}`;
+    mesh.position.copy(origin);
+    mesh.renderOrder = 26;
+    this.world.scene.add(mesh);
+    this.chatProjectiles.push({
+      mesh,
+      previous: origin.clone(),
+      direction,
+      distance: 0,
+    });
+  }
+
+  private updateChatProjectiles(delta: number): void {
+    const head = this.world.player.head;
+    head.updateWorldMatrix(true, false);
+    const headCenter = head.getWorldPosition(new Vector3());
+    const torsoCenter = headCenter.clone();
+    torsoCenter.y -= 0.27;
+    for (let index = this.chatProjectiles.length - 1; index >= 0; index -= 1) {
+      const projectile = this.chatProjectiles[index];
+      projectile.previous.copy(projectile.mesh.position);
+      const step = CHAT_PROJECTILE_SPEED * delta;
+      projectile.distance += step;
+      projectile.mesh.position.addScaledVector(projectile.direction, step);
+      const hitStreamer =
+        segmentHitsSphere(projectile.previous, projectile.mesh.position, headCenter, 0.14) ||
+        segmentHitsSphere(projectile.previous, projectile.mesh.position, torsoCenter, 0.2);
+      if (hitStreamer) {
+        if (this.roundActive) {
+          this.chatHits += 1;
+          this.renderHud();
+        }
+        projectile.mesh.removeFromParent();
+        this.chatProjectiles.splice(index, 1);
+        continue;
+      }
+      if (projectile.distance >= CHAT_PROJECTILE_RANGE) {
+        projectile.mesh.removeFromParent();
+        this.chatProjectiles.splice(index, 1);
+      }
+    }
+  }
+
   private applyHit(blaster: Entity, target: Entity, time: number): void {
     const object = target.object3D;
     if (
@@ -222,7 +314,11 @@ export class PaintballBlasterSystem extends createSystem({
   private startRound(): void {
     this.roundActive = true;
     this.roundStartedAt = this.currentTime;
+    this.roundId = createChallengeId();
     this.roundHits = 0;
+    this.chatHits = 0;
+    this.winnerMessage = '';
+    this.winnerUntil = 0;
     this.renderedSecond = -1;
     if (this.hud != null) this.hud.visible = true;
     this.renderHud();
@@ -231,7 +327,11 @@ export class PaintballBlasterSystem extends createSystem({
   private stopRound(): void {
     this.roundActive = false;
     this.roundStartedAt = 0;
+    this.roundId = null;
     this.roundHits = 0;
+    this.chatHits = 0;
+    this.winnerMessage = '';
+    this.winnerUntil = 0;
     if (this.hud != null) this.hud.visible = false;
   }
 
@@ -239,8 +339,20 @@ export class PaintballBlasterSystem extends createSystem({
     if (!this.roundActive) return;
     let remaining = Math.max(0, Math.ceil(ROUND_SECONDS - (time - this.roundStartedAt)));
     if (remaining <= 0) {
+      const winner = battleWinner(this.roundHits, this.chatHits);
+      this.winnerMessage = `${
+        winner === 'streamer' ? 'STREAMER WINS!' : winner === 'chat' ? 'CHAT WINS!' : 'TIE GAME!'
+      }  ${this.roundHits}–${this.chatHits}`;
+      this.winnerUntil = time + 3.8;
+      if (this.roundId != null) {
+        window.dispatchEvent(new CustomEvent('holohangout:challenge-completed', {
+          detail: { challengeId: this.roundId },
+        }));
+      }
       this.roundStartedAt = time;
+      this.roundId = createChallengeId();
       this.roundHits = 0;
+      this.chatHits = 0;
       remaining = ROUND_SECONDS;
     }
     if (remaining !== this.renderedSecond) this.renderHud(remaining);
@@ -284,7 +396,12 @@ export class PaintballBlasterSystem extends createSystem({
     context.fillStyle = '#FFFFFF';
     context.font = '800 50px system-ui, sans-serif';
     context.textAlign = 'center';
-    context.fillText(`HITS: ${this.roundHits}`, 384, 253);
+    context.fillText(`STREAMER ${this.roundHits}   VS   CHAT ${this.chatHits}`, 384, 245);
+    if (this.winnerMessage && this.currentTime < this.winnerUntil) {
+      context.fillStyle = '#FFE179';
+      context.font = '900 28px system-ui, sans-serif';
+      context.fillText(this.winnerMessage, 384, 284);
+    }
     if (hud.material.map != null) hud.material.map.needsUpdate = true;
   }
 
@@ -376,4 +493,9 @@ export class PaintballBlasterSystem extends createSystem({
     }
     return closest == null ? null : { entity: closest, distance: closestDistance };
   }
+}
+
+function createChallengeId(): string {
+  return globalThis.crypto?.randomUUID?.() ??
+    `challenge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }

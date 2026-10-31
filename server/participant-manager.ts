@@ -13,6 +13,7 @@ import {
   type MonsterType,
   type MonsterCommandSpec,
 } from '../shared/monsters.js';
+import { BlastCommandLimiter } from '../shared/blast-command-limiter.js';
 
 export interface ChatMessage {
   userId: string;
@@ -72,6 +73,8 @@ export class ParticipantManager {
   private readonly scores = new Map<string, number>();
   private readonly scoreCooldowns = new Map<string, number>();
   private readonly reactionCooldowns = new Map<string, number>();
+  private readonly blastSequences = new Map<string, number>();
+  private readonly blastLimiter = new BlastCommandLimiter();
   private readonly maxParticipants: number;
   private readonly actionCooldownMs: number;
   private readonly chatCooldownMs: number;
@@ -133,6 +136,7 @@ export class ParticipantManager {
     }
     const participant = this.participants.get(message.userId);
     if (text.startsWith('!')) {
+      if (command === '!blast') return this.blast(message.userId);
       const reaction = command == null ? undefined : UNIVERSAL_REACTIONS[command];
       if (reaction != null) return this.react(message.userId, reaction);
       const action =
@@ -180,6 +184,8 @@ export class ParticipantManager {
     this.scores.clear();
     this.scoreCooldowns.clear();
     this.reactionCooldowns.clear();
+    this.blastSequences.clear();
+    this.blastLimiter.clear();
     this.options.emit(this.leaderboardMessage());
   }
 
@@ -258,6 +264,7 @@ export class ParticipantManager {
       type: 'viewer.welcome',
       userId: participant.userId,
       displayName: participant.displayName,
+      monsterName: participant.monsterName,
     });
     this.options.onRealViewerJoined?.(this.public(participant));
     this.options.emit(this.leaderboardMessage());
@@ -339,6 +346,8 @@ export class ParticipantManager {
       this.scores.delete(userId);
       this.scoreCooldowns.delete(userId);
       this.reactionCooldowns.delete(userId);
+      this.blastSequences.delete(userId);
+      this.blastLimiter.remove(userId);
       this.options.emit({ type: 'avatar.removed', userId });
       this.reconcileBots();
     }, this.leaveDeadlineMs);
@@ -369,6 +378,20 @@ export class ParticipantManager {
     this.options.emit({ type: 'avatar.reaction', userId, reaction });
     this.scores.set(userId, (this.scores.get(userId) ?? 0) + 2);
     this.options.emit(this.leaderboardMessage());
+    return true;
+  }
+
+  private blast(userId: string): boolean {
+    const participant = this.participants.get(userId);
+    if (
+      participant == null ||
+      participant.isBot ||
+      participant.behavior === AvatarBehaviors.Leaving ||
+      !this.blastLimiter.accept(userId, Date.now())
+    ) return false;
+    const blastSequence = (this.blastSequences.get(userId) ?? 0) + 1;
+    this.blastSequences.set(userId, blastSequence);
+    this.options.emit({ type: 'avatar.blast', userId, blastSequence });
     return true;
   }
 
@@ -457,6 +480,8 @@ export class ParticipantManager {
     this.clearTimers(participant);
     this.participants.delete(participant.userId);
     this.cooldowns.delete(participant.userId);
+    this.blastSequences.delete(participant.userId);
+    this.blastLimiter.remove(participant.userId);
     this.options.emit({ type: 'avatar.leave', userId: participant.userId, deadlineMs: 0 });
     this.options.emit({ type: 'avatar.removed', userId: participant.userId });
   }

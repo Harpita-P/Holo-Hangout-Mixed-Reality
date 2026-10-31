@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { isClientMessage, type ServerMessage } from '../shared/protocol.js';
 import { ParticipantManager, type ChatMessage } from './participant-manager.js';
+import { HangoutMomentsService } from './hangout-moments.js';
 import { NativeCaptureReceiver } from './native-capture-receiver.js';
 import { ObsController } from './obs-controller.js';
 import {
@@ -23,6 +24,7 @@ const clientId = process.env.TWITCH_CLIENT_ID?.trim() ?? '';
 const clientSecret = process.env.TWITCH_CLIENT_SECRET?.trim() ?? '';
 const debugCommands = process.env.CHATIRL_ALLOW_DEBUG_COMMANDS === 'true';
 const tokenPath = resolve('.chatirl', 'twitch-token.json');
+const momentsPath = resolve('.chatirl', 'hangout-moments.json');
 const oauthStates = new Map<string, number>();
 const clients = new Set<WebSocket>();
 const dashboardCsrfToken = randomBytes(24).toString('base64url');
@@ -30,6 +32,7 @@ const dashboardCsrfToken = randomBytes(24).toString('base64url');
 let twitchStatus: TwitchStatus = {
   connected: false,
   broadcasterLogin: null,
+  clipsAuthorized: false,
   error:
     clientId && clientSecret
       ? null
@@ -116,6 +119,12 @@ twitch =
         (token) => saveToken(token).catch(reportServerError),
       )
     : null;
+const moments = new HangoutMomentsService(
+  twitch,
+  momentsPath,
+  () => undefined,
+  (clip) => broadcast({ type: 'hangout.moment', clipId: clip.id }),
+);
 
 const webSockets = new WebSocketServer({ noServer: true, maxPayload: 65_536 });
 webSockets.on('connection', (socket) => {
@@ -128,6 +137,9 @@ webSockets.on('connection', (socket) => {
         socket.send(JSON.stringify(participants.snapshotMessage()));
         socket.send(JSON.stringify(participants.leaderboardMessage()));
         socket.send(JSON.stringify(statusMessage()));
+      }
+      if (message.type === 'challenge.completed') {
+        void moments.completeChallenge(message.challengeId).catch(reportServerError);
       }
       // avatar.held is intentionally informational. !leave remains authoritative
       // and the Quest client forcibly releases held avatars before removing them.
@@ -166,6 +178,7 @@ server.listen(port, host, async () => {
   if (captureReceiver.status().enabled && captureReceiver.status().autoStart) {
     captureReceiver.start().catch(reportServerError);
   }
+  await moments.load();
   if (twitch != null) {
     const savedToken = await loadToken();
     if (savedToken != null) {
@@ -173,6 +186,7 @@ server.listen(port, host, async () => {
         twitchStatus = {
           connected: false,
           broadcasterLogin: savedToken.login,
+          clipsAuthorized: false,
           error: error instanceof Error ? error.message : String(error),
         };
       });
@@ -206,6 +220,7 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
       ),
       obs: obsStatus,
       capture: captureReceiver.status(),
+      moments: moments.status(),
       debugCommands,
     });
     return;
@@ -314,6 +329,20 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
     await sendObsOperation(response, () => obs.stopStream());
     return;
   }
+  if (request.method === 'POST' && url.pathname === '/admin/moments/auto') {
+    const body = await readJson(request);
+    requireDashboardToken(body);
+    sendJson(response, 200, {
+      ok: true,
+      moments: await moments.setAutoClipEnabled(body.enabled === true),
+    });
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/admin/moments/clip') {
+    requireDashboardToken(await readJson(request));
+    sendJson(response, 200, { ok: true, moments: await moments.createManualMoment() });
+    return;
+  }
   if (request.method === 'POST' && url.pathname === '/debug/chat' && debugCommands) {
     const body = await readJson(request);
     if (
@@ -364,16 +393,22 @@ ${configured ? '<a class="button" href="/auth/twitch">Authorize / reconnect Twit
 <p id="stream-status" class="warn">Not streaming</p><p id="broadcast-error" class="error"></p>
 <div class="actions"><button id="use-native">Use Native Feed</button><button id="use-mqdh" class="secondary">Use MQDH Fallback</button><button id="obs-reconnect" class="secondary">Reconnect OBS</button><button id="start-stream" class="live" disabled>Start Stream</button><button id="stop-stream" class="danger" disabled>Stop Stream</button></div>
 <p><small>Native Quest Capture is preferred when its receiver and OBS Media Source are healthy. MQDH remains an enabled-source fallback. OBS owns the Twitch destination; ChatIRL never stores your stream key.</small></p></section>
+<section class="card"><h2>Hangout Moments</h2><p id="moment-status" class="muted">Ready when Twitch is live.</p>
+<div class="actions"><button id="moment-auto" class="secondary">Auto-Clip Moments: OFF</button><button id="moment-clip">Clip This Moment</button></div>
+<div id="moment-list"><small>No moments clipped yet.</small></div>
+<p><small>Verified Twitch clips appear here. Automatic clips run once after a completed 60-second blaster challenge, with a 5-minute cooldown.</small></p></section>
 <section class="card"><h2>Session</h2><p><strong id="participant-count">${participants.demoStatus().realParticipantCount}/10</strong> viewer avatars active.</p>
 <button id="allow-joins">Allow joins</button><button id="pause-joins" class="secondary">Pause joins</button><button id="clear-avatars" class="danger">Clear avatars</button><div id="participant-list"><small>No monsters have joined yet.</small></div></section>
-<section class="card"><h2>Viewer commands</h2><p><strong>Big</strong><br><code>!run · !jump · !wave · !duck · !punch · !yes · !no</code></p><p><strong>Blob</strong><br><code>!dance · !jump · !bite · !walk · !yes · !no</code></p><p><strong>Flying</strong><br><code>!fly · !headbutt · !punch · !yes · !no</code></p><p><small>Every monster supports <code>!join</code> and <code>!leave</code>. Commands control only the sender's monster; unsupported commands are ignored. <code>!leave</code> forcibly releases a held monster.</small></p></section>
+<section class="card"><h2>Viewer commands</h2><p><strong>Big</strong><br><code>!run · !jump · !wave · !duck · !punch · !yes · !no</code></p><p><strong>Blob</strong><br><code>!dance · !jump · !bite · !walk · !yes · !no</code></p><p><strong>Flying</strong><br><code>!fly · !headbutt · !punch · !yes · !no</code></p><p><small>Every monster supports <code>!join</code>, <code>!blast</code>, and <code>!leave</code>. Commands control only the sender's monster; unsupported commands are ignored. <code>!leave</code> forcibly releases a held monster.</small></p></section>
 <script>
 const csrfToken=${csrfToken};let latest=null;const byId=(id)=>document.getElementById(id);
 function dot(id,state,warning=false){const element=byId(id);element.className='dot'+(state?' ok':warning?' warn':'');}
-function renderParticipants(items){const root=byId('participant-list');root.replaceChildren();if(!items.length){const empty=document.createElement('small');empty.textContent='No monsters have joined yet.';root.append(empty);return;}for(const item of items){const row=document.createElement('div');row.className='participant';const title=document.createElement('strong');title.textContent=item.displayName+' · '+item.monsterName;const meta=document.createElement('small');meta.textContent=item.monsterCategory.toUpperCase()+' · '+item.behavior;const commands=document.createElement('code');commands.textContent=item.supportedCommands.join(' · ');row.append(title,meta,document.createElement('br'),commands);root.append(row);}}
+function renderParticipants(items){renderMoments(latest.moments,latest.twitch);const root=byId('participant-list');root.replaceChildren();if(!items.length){const empty=document.createElement('small');empty.textContent='No monsters have joined yet.';root.append(empty);return;}for(const item of items){const row=document.createElement('div');row.className='participant';const title=document.createElement('strong');title.textContent=item.displayName+' · '+item.monsterName;const meta=document.createElement('small');meta.textContent=item.monsterCategory.toUpperCase()+' · '+item.behavior;const commands=document.createElement('code');commands.textContent=item.supportedCommands.join(' · ');row.append(title,meta,document.createElement('br'),commands);root.append(row);}}
+function renderMoments(value,twitch){byId('moment-status').textContent=value.message;byId('moment-status').className=value.state==='ready'?'ok':value.state==='failed'?'error':value.state==='unavailable'?'warn':'muted';byId('moment-auto').textContent='Auto-Clip Moments: '+(value.autoClipEnabled?'ON':'OFF');byId('moment-auto').className=value.autoClipEnabled?'':'secondary';byId('moment-clip').disabled=value.state==='creating'||!twitch.connected||!twitch.clipsAuthorized;const root=byId('moment-list');root.replaceChildren();if(!value.recent.length){const empty=document.createElement('small');empty.textContent='No moments clipped yet.';root.append(empty);return;}for(const clip of value.recent){const row=document.createElement('div');row.className='participant';const link=document.createElement('a');link.href=clip.url;link.target='_blank';link.rel='noopener';link.textContent=clip.title||'HoloHangout Moment';const meta=document.createElement('small');meta.textContent=new Date(clip.createdAt).toLocaleString();row.append(link,document.createElement('br'),meta);root.append(row);}}
 function render(state){latest=state;const twitch=state.twitch;byId('twitch-status').textContent=twitch.connected?'Connected as '+(twitch.broadcasterLogin||'streamer'):(twitch.error||'Twitch disconnected');byId('twitch-status').className=twitch.connected?'ok':'warn';byId('participant-count').textContent=state.participantCount+'/10';renderParticipants(state.participants);const capture=state.capture;dot('receiver-dot',capture.listening,capture.enabled);byId('receiver-status').textContent=capture.listening?'Listening on TCP '+capture.inputPort:capture.enabled?'Stopped':'Disabled in .env';dot('quest-dot',capture.receiverConnected,capture.listening);byId('quest-status').textContent=capture.receiverConnected?'Connected'+(capture.reconnectCount?' · '+capture.reconnectCount+' reconnect(s)':''):capture.listening?'Waiting for Start Capture':'Receiver not running';dot('video-dot',capture.videoActive,capture.receiverConnected);byId('video-status').textContent=capture.stalled?'STALLED · '+capture.message:capture.videoActive?capture.bitrateMbps.toFixed(2)+' Mbps · active':capture.message;dot('usb-dot',capture.adbConfigured,capture.enabled);byId('usb-status').textContent=capture.adbConfigured?'ADB reverse ready':'Select Configure USB';byId('capture-usb').disabled=!capture.enabled;byId('capture-restart').disabled=!capture.enabled;byId('capture-stop').disabled=!capture.listening;const obs=state.obs;dot('obs-dot',obs.connected,obs.enabled);byId('obs-status').textContent=obs.connected?'Connected · OBS '+(obs.obsVersion||''):obs.enabled?'Disconnected':'Disabled in .env';dot('scene-dot',obs.targetSceneAvailable);byId('scene-status').textContent=obs.targetSceneAvailable?obs.targetScene+' ready':'Need scene: '+obs.targetScene;dot('capture-dot',obs.captureHealthy,obs.captureMode==='mqdh');byId('capture-status').textContent=obs.captureMode==='native'?'Native · '+obs.captureSourceName+' · '+obs.captureHealthReason:obs.captureMode==='mqdh'?'Fallback · '+obs.captureSourceName+' · verify OBS motion':obs.captureHealthReason;dot('mic-dot',obs.microphoneSourceAvailable===true,obs.microphoneSourceName===null);byId('mic-status').textContent=obs.microphoneSourceName===null?'Not checked (optional)':obs.microphoneSourceAvailable?obs.microphoneSourceName+' · delay '+obs.microphoneSyncOffsetMs+' ms':'Need source: '+obs.microphoneSourceName;byId('stream-status').textContent=obs.streaming?'LIVE · '+obs.outputTimecode:obs.reconnecting?'OBS reconnecting…':'Not streaming';byId('stream-status').className=obs.streaming?'error':'warn';byId('broadcast-error').textContent=obs.error||(capture.enabled&&capture.error?capture.error:'');byId('use-native').disabled=!obs.connected||!capture.videoActive;byId('use-mqdh').disabled=!obs.connected||!obs.fallbackCaptureSourceName;byId('obs-reconnect').disabled=!obs.enabled;byId('start-stream').disabled=!obs.ready||obs.streaming||!twitch.connected;byId('stop-stream').disabled=!obs.connected||!obs.streaming;}
 async function refresh(){try{const response=await fetch('/status',{cache:'no-store'});render(await response.json());}catch(error){byId('broadcast-error').textContent='Dashboard status unavailable: '+error.message;}}
 async function action(path,body={}){const response=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...body,csrfToken})});const result=await response.json();if(!response.ok)throw new Error(result.error||'Request failed');await refresh();return result;}
+byId('moment-auto').onclick=()=>action('/admin/moments/auto',{enabled:!latest.moments.autoClipEnabled}).catch((error)=>byId('moment-status').textContent=error.message);byId('moment-clip').onclick=()=>action('/admin/moments/clip').catch((error)=>byId('moment-status').textContent=error.message);
 byId('capture-usb').onclick=()=>action('/admin/capture/usb').catch((error)=>byId('broadcast-error').textContent=error.message);byId('capture-restart').onclick=()=>action('/admin/capture/restart').catch((error)=>byId('broadcast-error').textContent=error.message);byId('capture-stop').onclick=()=>action('/admin/capture/stop').catch((error)=>byId('broadcast-error').textContent=error.message);byId('use-native').onclick=()=>action('/admin/obs/capture/native').catch((error)=>byId('broadcast-error').textContent=error.message);byId('use-mqdh').onclick=()=>action('/admin/obs/capture/mqdh').catch((error)=>byId('broadcast-error').textContent=error.message);byId('obs-reconnect').onclick=()=>action('/admin/obs/reconnect').catch((error)=>byId('broadcast-error').textContent=error.message);byId('start-stream').onclick=()=>{if(confirm('Start the Twitch livestream using the current OBS output settings?'))action('/admin/stream/start').catch((error)=>byId('broadcast-error').textContent=error.message);};byId('stop-stream').onclick=()=>action('/admin/stream/stop').catch((error)=>byId('broadcast-error').textContent=error.message);byId('allow-joins').onclick=()=>action('/admin/joins',{accepting:true});byId('pause-joins').onclick=()=>action('/admin/joins',{accepting:false});byId('clear-avatars').onclick=()=>{if(confirm('Remove all viewer avatars?'))action('/admin/clear');};refresh();setInterval(refresh,1500);
 </script></body></html>`;
 }

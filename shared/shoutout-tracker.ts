@@ -8,7 +8,7 @@ export class ShoutoutTracker {
   private readonly cooldowns = new Map<string, number>();
 
   constructor(
-    private readonly holdSeconds = 4,
+    private readonly holdSeconds = 3,
     private readonly cooldownSeconds = 20,
   ) {}
 
