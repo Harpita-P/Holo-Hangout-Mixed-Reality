@@ -6,7 +6,7 @@ HoloHangout brings Twitch viewers into a streamer's mixed-reality world as anima
 
 [Get Started](#quick-start) · [Download Source](https://github.com/Harpita-P/ChatIRL-MixedReality/archive/refs/heads/main.zip) · [Quest Capture APK](release/HoloHangout-Capture.apk) · [Twitch Setup](docs/TWITCH.md) · [Quest + OBS Setup](docs/QUEST-OBS.md) · [Chat Commands](docs/COMMANDS.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
 
-> HoloHangout is a local-only, macOS creator toolkit. It does not upload your Twitch credentials, headset feed, or OBS configuration to a HoloHangout cloud service.
+> HoloHangout is a local-only Windows and macOS creator toolkit. It does not upload your Twitch credentials, headset feed, or OBS configuration to a HoloHangout cloud service.
 
 ## What it does
 
@@ -27,7 +27,7 @@ HoloHangout brings Twitch viewers into a streamer's mixed-reality world as anima
 
 ## Requirements
 
-- macOS (the release launcher is currently verified only on macOS).
+- Windows 10/11 or macOS.
 - Node.js `22.19.0` recommended; compatible ranges are enforced by `package.json`.
 - Meta Quest 3 or Quest 3S with developer mode and USB debugging enabled.
 - A USB data cable, Android Platform Tools (`adb`), and FFmpeg.
@@ -36,9 +36,14 @@ HoloHangout brings Twitch viewers into a streamer's mixed-reality world as anima
 
 ## Quick start
 
+Install Node.js directly from [nodejs.org](https://nodejs.org/) and confirm `node --version` works. `nvm` is not required. Install [OBS Studio](https://obsproject.com/), [Android Platform Tools](https://developer.android.com/tools/releases/platform-tools), and [FFmpeg](https://ffmpeg.org/download.html), ensuring `adb` and `ffmpeg` are available on `PATH`.
+
+On both macOS Terminal and Windows PowerShell:
+
 ```bash
 git clone https://github.com/Harpita-P/ChatIRL-MixedReality.git
 cd ChatIRL-MixedReality
+npm install
 npm run setup
 ```
 
@@ -54,7 +59,9 @@ Start every HoloHangout session with one command:
 npm run start:holohangout
 ```
 
-On macOS, you can instead double-click **Start HoloHangout.command**. Keep its Terminal window open; press **Control-C** to stop everything cleanly.
+You can instead double-click **Start HoloHangout.command** on macOS or **Start HoloHangout.cmd** on Windows. Keep the launcher window open; press **Control-C** to stop everything cleanly.
+
+The macOS + Quest 3S workflow has been tested on real hardware. Windows launch, dependency checks, ADB forwarding, Android builds, and process cleanup now have native code paths, but the complete Windows + Quest + OBS workflow still requires verification on a physical Windows machine.
 
 Run a readiness report at any time:
 
@@ -88,7 +95,7 @@ Streamer dashboard ◄────────────┘                   
 Twitch viewers ◄── Twitch ◄── OBS ◄── local receiver ◄── HoloHangout Capture
 ```
 
-Everything stays on the streamer's Mac and USB-connected Quest except Twitch's normal OAuth, chat, clip, and livestream services.
+Everything stays on the streamer's computer and USB-connected Quest except Twitch's normal OAuth, chat, and livestream services.
 
 ## Documentation
 

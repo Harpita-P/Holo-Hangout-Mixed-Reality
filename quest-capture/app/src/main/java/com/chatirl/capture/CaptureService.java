@@ -158,7 +158,7 @@ public final class CaptureService extends Service {
                 requestKeyFrame();
             }
         });
-        publishStatus("waiting", "Capture active; waiting for Mac receiver at " + host + ":" + port);
+        publishStatus("waiting", "Capture active; waiting for computer receiver at " + host + ":" + port);
         publisher.start();
 
         capturing.set(true);

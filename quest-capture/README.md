@@ -47,13 +47,13 @@ https://developer.android.com/media/grow/media-projection
 
 ## Build and install
 
-Requirements on the Mac:
+Requirements on the Windows or macOS computer:
 
 - Java 11
 - Android SDK Platform and Build Tools 33 or newer
 - `adb`
 - FFmpeg
-- Node.js from the repository `.nvmrc`
+- A Node.js version allowed by the repository's `package.json`
 
 Build from the repository root:
 
@@ -75,7 +75,7 @@ npm run capture:install
 ```
 
 The app appears under the Quest library's unknown/development sources as
-**HoloHangout Capture**. It can also be launched from the Mac:
+**HoloHangout Capture**. It can also be launched from the computer:
 
 ```sh
 adb shell monkey -p com.chatirl.capture \
@@ -152,7 +152,7 @@ macOS capture source is used only when deliberately falling back.
 1. Stop MQDH casting. Horizon OS permits only one active MediaProjection session.
 2. Start the HoloHangout server and IWSDK app normally. The receiver starts with the
    control server.
-3. Open `http://localhost:8787` and select **Configure USB**. Confirm **Mac
+3. Open `http://localhost:8787` and select **Configure USB**. Confirm the **local
    receiver** is listening.
 4. Open **HoloHangout Capture** on Quest.
 5. Leave receiver host `127.0.0.1` and port `49152` unchanged.
@@ -194,7 +194,7 @@ adb logcat -s ChatIRLCapture
 
 Common states:
 
-- **WAITING**: the capture and encoder are active, but the Mac receiver is not
+- **WAITING**: the capture and encoder are active, but the computer receiver is not
   reachable. Confirm the receiver process and `adb reverse --list`.
 - **STREAMING**: the Quest TCP connection is active. The receiver should report
   roughly the configured 5 Mbps during motion.
@@ -205,7 +205,7 @@ Common states:
 
 ## Complete real-device and Twitch acceptance test
 
-The Mac transport has an automated synthetic-stream check during development,
+The local transport has an automated synthetic-stream check during development,
 but the following items require the physical Quest compositor:
 
 1. Open `https://localhost:8081/capture-test.html` for two minutes. Its timestamp

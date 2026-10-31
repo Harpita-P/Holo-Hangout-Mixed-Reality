@@ -58,7 +58,7 @@ final class TcpVideoPublisher implements AutoCloseable {
 
     private void sendLoop() {
         while (running) {
-            listener.onState("waiting", "Waiting for Mac receiver at " + host + ":" + port);
+            listener.onState("waiting", "Waiting for computer receiver at " + host + ":" + port);
             try (Socket nextSocket = new Socket()) {
                 socket = nextSocket;
                 nextSocket.setTcpNoDelay(true);

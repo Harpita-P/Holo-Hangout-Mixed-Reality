@@ -173,7 +173,7 @@ export class NativeCaptureReceiver {
       this.patch({
         adbConfigured: true,
         message: this.state.receiverConnected
-          ? 'Quest video is reaching the Mac receiver.'
+          ? 'Quest video is reaching the local receiver.'
           : 'USB reverse configured; waiting for Quest video.',
         error: null,
       });

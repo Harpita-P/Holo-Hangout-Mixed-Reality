@@ -4,6 +4,8 @@ Start with `npm run check`.
 
 If macOS blocks the double-clickable launcher because it came from the internet, Control-click `Start HoloHangout.command`, choose **Open**, and confirm once. The launcher runs the same repository command documented in the README.
 
+On Windows, run `Start HoloHangout.cmd` or use `npm run start:holohangout` from PowerShell. If `adb` or `ffmpeg` is not found, add its installation folder to the Windows `PATH`, open a new PowerShell window, and run `npm run check` again.
+
 ## Quest is not detected
 
 Use a USB data cable, enable developer mode, approve USB debugging inside Quest, and run `adb devices`. The state must be `device`, not `unauthorized`.
@@ -17,7 +19,7 @@ adb reverse tcp:8081 tcp:8081
 adb reverse tcp:49152 tcp:49152
 ```
 
-Quest's `localhost` reaches the Mac only through these mappings.
+Quest's `localhost` reaches the local computer only through these mappings.
 
 ## Certificate warning
 

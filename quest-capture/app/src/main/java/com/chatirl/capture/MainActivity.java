@@ -100,7 +100,7 @@ public final class MainActivity extends Activity {
         content.addView(actions);
 
         content.addView(text("Diagnostics", 18, Color.WHITE));
-        logView = text("Ready. Start the Mac receiver before capture.\n", 14, Color.LTGRAY);
+        logView = text("Ready. Start the computer receiver before capture.\n", 14, Color.LTGRAY);
         logView.setTextIsSelectable(true);
         content.addView(logView);
 

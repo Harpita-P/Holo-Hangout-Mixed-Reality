@@ -7,6 +7,7 @@ export const projectRoot = resolve(import.meta.dirname, '..');
 export const dashboardUrl = 'http://localhost:8787';
 export const questUrl = 'https://localhost:8081/';
 export const releaseApk = join(projectRoot, 'release', 'HoloHangout-Capture.apk');
+export const supportedDesktop = process.platform === 'darwin' || process.platform === 'win32';
 
 export function supportedNode(version = process.versions.node) {
   const [major, minor] = version.split('.').map(Number);
@@ -16,7 +17,7 @@ export function supportedNode(version = process.versions.node) {
 export function executable(name) {
   const suffixes = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
   return (process.env.PATH ?? '').split(delimiter).some((directory) =>
-    suffixes.some((suffix) => existsSync(join(directory, `${name}${suffix}`))),
+    suffixes.some((suffix) => existsSync(join(directory.replace(/^"|"$/gu, ''), `${name}${suffix}`))),
   );
 }
 
@@ -43,9 +44,18 @@ export function adbDevices() {
 }
 
 export function obsInstalled() {
-  return process.platform === 'darwin'
-    ? existsSync('/Applications/OBS.app') || existsSync('/Applications/OBS Studio.app')
-    : executable('obs');
+  if (process.platform === 'darwin') {
+    return existsSync('/Applications/OBS.app') || existsSync('/Applications/OBS Studio.app');
+  }
+  if (process.platform === 'win32') {
+    return [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA]
+      .filter(Boolean)
+      .some((root) =>
+        existsSync(join(root, 'obs-studio', 'bin', '64bit', 'obs64.exe')) ||
+        existsSync(join(root, 'Programs', 'obs-studio', 'bin', '64bit', 'obs64.exe')),
+      );
+  }
+  return executable('obs');
 }
 
 export function portInUse(port, host = '127.0.0.1', timeoutMs = 250) {
@@ -62,9 +72,30 @@ export function portInUse(port, host = '127.0.0.1', timeoutMs = 250) {
 }
 
 export function run(command, args, options = {}) {
-  return spawnSync(command, args, {
+  const invocation = commandInvocation(command, args);
+  return spawnSync(invocation.command, invocation.args, {
     cwd: projectRoot,
     encoding: 'utf8',
     ...options,
   });
+}
+
+export function commandInvocation(command, args = []) {
+  if (process.platform === 'win32' && (command === 'npm' || command === 'npx')) {
+    return {
+      command: process.env.ComSpec || 'cmd.exe',
+      args: ['/d', '/s', '/c', command, ...args],
+    };
+  }
+  return { command, args };
+}
+
+export function prerequisiteHint(command) {
+  if (process.platform === 'win32') {
+    if (command === 'adb') return 'install Android SDK Platform Tools and add platform-tools to PATH';
+    if (command === 'ffmpeg') return 'install FFmpeg and add its bin folder to PATH';
+  }
+  if (command === 'adb') return 'install with: brew install android-platform-tools';
+  if (command === 'ffmpeg') return 'install with: brew install ffmpeg';
+  return `install ${command} and add it to PATH`;
 }

@@ -6,18 +6,20 @@ import {
   executable,
   obsInstalled,
   portInUse,
+  prerequisiteHint,
   questUrl,
   releaseApk,
+  supportedDesktop,
   supportedNode,
 } from './local-toolkit.mjs';
 
 const rows = [];
 const add = (level, label, detail) => rows.push({ level, label, detail });
 
-add(process.platform === 'darwin' ? 'ok' : 'error', 'Operating system',
-  process.platform === 'darwin' ? `macOS ${process.arch}` : `${process.platform} is not yet supported`);
+add(supportedDesktop ? 'ok' : 'error', 'Operating system',
+  supportedDesktop ? `${process.platform === 'win32' ? 'Windows' : 'macOS'} ${process.arch}` : `${process.platform} is not supported`);
 add(supportedNode() ? 'ok' : 'error', 'Node.js',
-  supportedNode() ? process.versions.node : `${process.versions.node}; use the version in .nvmrc`);
+  supportedNode() ? process.versions.node : `${process.versions.node}; Node 22.19.0 is recommended`);
 
 const env = envKeys();
 add(env.size > 0 ? 'ok' : 'error', 'Local configuration',
@@ -28,11 +30,11 @@ for (const key of ['TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET']) {
 }
 
 add(executable('adb') ? 'ok' : 'error', 'ADB',
-  executable('adb') ? 'available' : 'install with: brew install android-platform-tools');
+  executable('adb') ? 'available' : prerequisiteHint('adb'));
 add(executable('ffmpeg') ? 'ok' : 'error', 'FFmpeg',
-  executable('ffmpeg') ? 'available' : 'install with: brew install ffmpeg');
+  executable('ffmpeg') ? 'available' : prerequisiteHint('ffmpeg'));
 add(obsInstalled() ? 'ok' : 'warn', 'OBS Studio',
-  obsInstalled() ? 'installed' : 'not found in /Applications');
+  obsInstalled() ? 'installed' : 'not found in the standard installation location');
 add(existsSync(releaseApk) ? 'ok' : 'error', 'HoloHangout Capture APK',
   existsSync(releaseApk) ? 'release/HoloHangout-Capture.apk' : 'missing release APK');
 

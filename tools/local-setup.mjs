@@ -3,20 +3,22 @@ import { join } from 'node:path';
 import {
   adbDevices,
   executable,
+  prerequisiteHint,
   projectRoot,
   releaseApk,
   run,
+  supportedDesktop,
   supportedNode,
 } from './local-toolkit.mjs';
 
 console.log('\nHoloHangout first-time setup\n');
 const verifyOnly = process.argv.includes('--verify');
-if (process.platform !== 'darwin') {
-  console.error('HoloHangout release tooling is currently verified only on macOS.');
+if (!supportedDesktop) {
+  console.error('HoloHangout local tooling supports Windows and macOS.');
   process.exit(1);
 }
 if (!supportedNode()) {
-  console.error(`Node ${process.versions.node} is unsupported. Install the version listed in .nvmrc.`);
+  console.error(`Node ${process.versions.node} is unsupported. Install a version allowed by package.json (Node 22.19.0 is recommended).`);
   process.exit(1);
 }
 
@@ -31,7 +33,7 @@ if (!verifyOnly) {
 const envPath = join(projectRoot, '.env');
 if (!existsSync(envPath) && !verifyOnly) {
   copyFileSync(join(projectRoot, '.env.example'), envPath);
-  chmodSync(envPath, 0o600);
+  if (process.platform !== 'win32') chmodSync(envPath, 0o600);
   console.log('✓ Created private .env from .env.example (existing files are never overwritten).');
 } else if (existsSync(envPath)) {
   console.log('✓ Existing .env preserved.');
@@ -41,10 +43,10 @@ if (!existsSync(envPath) && !verifyOnly) {
 
 console.log(executable('adb')
   ? '✓ ADB is available.'
-  : '! ADB is missing. Install it with: brew install android-platform-tools');
+  : `! ADB is missing; ${prerequisiteHint('adb')}.`);
 console.log(executable('ffmpeg')
   ? '✓ FFmpeg is available.'
-  : '! FFmpeg is missing. Install it with: brew install ffmpeg');
+  : `! FFmpeg is missing; ${prerequisiteHint('ffmpeg')}.`);
 console.log(existsSync(releaseApk)
   ? '✓ Prebuilt HoloHangout Capture APK is available.'
   : '! Prebuilt APK is missing. This checkout is not release-ready.');

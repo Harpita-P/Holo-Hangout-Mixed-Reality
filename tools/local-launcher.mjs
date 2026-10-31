@@ -5,17 +5,19 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   adbDevices,
+  commandInvocation,
   dashboardUrl,
   executable,
   portInUse,
   projectRoot,
   questUrl,
   run,
+  supportedDesktop,
   supportedNode,
 } from './local-toolkit.mjs';
 
-if (process.platform !== 'darwin' || !supportedNode()) {
-  console.error('HoloHangout requires macOS and a supported Node version from .nvmrc. Run npm run check.');
+if (!supportedDesktop || !supportedNode()) {
+  console.error('HoloHangout requires Windows or macOS and a supported Node.js version. Run npm run check.');
   process.exit(1);
 }
 if (!existsSync(join(projectRoot, '.env'))) {
@@ -60,11 +62,12 @@ Dry run passed. The launcher would now start:
 
 const children = [];
 const startChild = (label, args) => {
-  const child = spawn('npm', args, {
+  const invocation = commandInvocation('npm', args);
+  const child = spawn(invocation.command, invocation.args, {
     cwd: projectRoot,
     stdio: 'inherit',
     env: process.env,
-    detached: true,
+    detached: process.platform !== 'win32',
   });
   child.on('exit', (code, signal) => {
     if (!stopping && code !== 0) {
@@ -106,7 +109,8 @@ Quest Browser: ${questUrl}
 
 Keep this Terminal window open. Press Control-C to stop HoloHangout cleanly.
 `);
-  run('open', [dashboardUrl]);
+  if (process.platform === 'darwin') run('open', [dashboardUrl]);
+  else run('cmd.exe', ['/d', '/s', '/c', 'start', '', dashboardUrl]);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   await shutdown(1);
@@ -117,10 +121,14 @@ async function shutdown(exitCode = 0) {
   stopping = true;
   console.log('\nStopping HoloHangout…');
   for (const child of children) {
-    try {
-      process.kill(-child.pid, 'SIGTERM');
-    } catch {
-      child.kill('SIGTERM');
+    if (process.platform === 'win32') {
+      run('taskkill', ['/PID', String(child.pid), '/T', '/F']);
+    } else {
+      try {
+        process.kill(-child.pid, 'SIGTERM');
+      } catch {
+        child.kill('SIGTERM');
+      }
     }
   }
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 600));
