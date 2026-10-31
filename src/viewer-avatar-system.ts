@@ -233,7 +233,7 @@ export class ViewerAvatarSystem extends createSystem({
         this.playFirstAvailable(runtime, ['HitReact', 'HitRecieve'], false, this.currentTime);
       }
       const userId = entity.getValue(ViewerAvatar, 'userId');
-      if (userId && runtime != null) {
+      if (userId && runtime != null && runtime.sandboxRequest == null) {
         this.shoutoutTracker.begin(userId, runtime.labelIsBot, this.currentTime);
       }
       if (userId) this.socket?.send({ type: 'avatar.held', userId, held: true });
@@ -1256,6 +1256,7 @@ export class ViewerAvatarSystem extends createSystem({
   }
 
   private attachSandboxRequest(runtime: AvatarRuntime, request: SandboxRequestSnapshot): void {
+    this.shoutoutTracker.cancel(request.userId);
     runtime.sandboxRequest = request;
     runtime.sandboxApprovalSent = request.status === 'generating';
     runtime.sandboxApprovalAttemptAt = 0;

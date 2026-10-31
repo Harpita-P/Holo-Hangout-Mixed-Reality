@@ -7,7 +7,7 @@ import {
   type VoxelBlueprint,
 } from '../shared/community-sandbox.js';
 import { generateMockBlueprint } from './community-sandbox-mock.js';
-import { OpenAIVoxelGenerator } from './openai-voxel-generator.js';
+import { GeminiVoxelGenerator } from './gemini-voxel-generator.js';
 
 interface ManagedRequest extends SandboxRequestSnapshot {
   isDemo: boolean;
@@ -19,7 +19,7 @@ export interface CommunitySandboxOptions {
   participant: (userId: string) => ParticipantSnapshot | null;
   apiKey: string;
   model?: string;
-  generator?: 'openai' | 'mock';
+  generator?: 'gemini' | 'mock';
   sessionLimit?: number;
   requestLifetimeMs?: number;
   viewerCooldownMs?: number;
@@ -34,11 +34,11 @@ export class CommunitySandbox {
   private readonly heldApprovalTimers = new Map<string, NodeJS.Timeout>();
   private readonly generationQueue: ManagedRequest[] = [];
   private readonly model: string;
-  private readonly generatorMode: 'openai' | 'mock';
+  private readonly generatorMode: 'gemini' | 'mock';
   private readonly sessionLimit: number;
   private readonly requestLifetimeMs: number;
   private readonly viewerCooldownMs: number;
-  private readonly openai: OpenAIVoxelGenerator | null;
+  private readonly gemini: GeminiVoxelGenerator | null;
   private readonly generateBlueprint: ((prompt: string) => Promise<VoxelBlueprint>) | null;
   private active = false;
   private generationInProgress = false;
@@ -46,12 +46,12 @@ export class CommunitySandbox {
   private lastError: string | null = null;
 
   constructor(private readonly options: CommunitySandboxOptions) {
-    this.model = options.model?.trim() || 'gpt-6-luna';
-    this.generatorMode = options.generator ?? 'openai';
+    this.model = options.model?.trim() || 'gemini-3.5-flash-lite';
+    this.generatorMode = options.generator ?? 'gemini';
     this.sessionLimit = options.sessionLimit ?? 20;
-    this.requestLifetimeMs = options.requestLifetimeMs ?? 45_000;
+    this.requestLifetimeMs = options.requestLifetimeMs ?? 15_000;
     this.viewerCooldownMs = options.viewerCooldownMs ?? 30_000;
-    this.openai = options.apiKey ? new OpenAIVoxelGenerator(options.apiKey, this.model) : null;
+    this.gemini = options.apiKey ? new GeminiVoxelGenerator(options.apiKey, this.model) : null;
     this.generateBlueprint = options.generateBlueprint ?? null;
   }
 
@@ -60,7 +60,7 @@ export class CommunitySandbox {
     return {
       active: this.active,
       generator: this.generatorMode,
-      apiKeyConfigured: this.openai != null,
+      apiKeyConfigured: this.gemini != null,
       model: this.model,
       pending: values.filter(({ status }) => status === 'pending').map(publicRequest),
       generating: values.filter(({ status }) => status === 'generating').map(publicRequest),
@@ -165,9 +165,9 @@ export class CommunitySandbox {
       request.expiresAt <= now || heldSince == null || now - heldSince < 350 ||
       this.generationQueue.length + (this.generationInProgress ? 1 : 0) >= 3
     ) return false;
-    if (this.generatorMode === 'openai' && this.openai == null && this.generateBlueprint == null) {
-      this.lastError = 'Add OPENAI_API_KEY to .env, then restart HoloHangout.';
-      this.options.emit({ type: 'sandbox.notice', text: 'Sandbox needs an OpenAI API key.' });
+    if (this.generatorMode === 'gemini' && this.gemini == null && this.generateBlueprint == null) {
+      this.lastError = 'Add GEMINI_API_KEY to .env, then restart HoloHangout.';
+      this.options.emit({ type: 'sandbox.notice', text: 'Sandbox needs a Gemini API key.' });
       this.options.emit(this.snapshotMessage());
       return false;
     }
@@ -260,8 +260,8 @@ export class CommunitySandbox {
       return Promise.resolve(generateMockBlueprint(request.prompt));
     }
     if (this.generateBlueprint != null) return this.generateBlueprint(request.prompt);
-    if (this.openai == null) return Promise.reject(new Error('OPENAI_API_KEY is not configured.'));
-    return this.openai.generate(request.prompt);
+    if (this.gemini == null) return Promise.reject(new Error('GEMINI_API_KEY is not configured.'));
+    return this.gemini.generate(request.prompt);
   }
 
   private nextCreationSlot(): number {

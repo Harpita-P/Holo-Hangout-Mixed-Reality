@@ -36,7 +36,7 @@ export interface SandboxCreationSnapshot {
 
 export interface CommunitySandboxSnapshot {
   active: boolean;
-  generator: 'openai' | 'mock';
+  generator: 'gemini' | 'mock';
   apiKeyConfigured: boolean;
   model: string;
   pending: SandboxRequestSnapshot[];

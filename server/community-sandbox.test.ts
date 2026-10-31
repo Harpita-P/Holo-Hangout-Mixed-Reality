@@ -44,13 +44,13 @@ test('holding the requesting avatar automatically approves its build', async () 
   sandbox.shutdown();
 });
 
-test('an OpenAI-style generator is never called until approval', async () => {
+test('a Gemini-style generator is never called until approval', async () => {
   let calls = 0;
   const sandbox = new CommunitySandbox({
     emit: () => undefined,
     participant: (userId) => userId === viewer.userId ? viewer : null,
     apiKey: '',
-    generator: 'openai',
+    generator: 'gemini',
     generateBlueprint: async (prompt) => {
       calls += 1;
       return generateMockBlueprint(prompt);
