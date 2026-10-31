@@ -100,6 +100,13 @@ export class ParticipantManager {
       );
   }
 
+  participant(userId: string): ParticipantSnapshot | null {
+    const participant = this.participants.get(userId);
+    return participant == null || participant.behavior === AvatarBehaviors.Leaving
+      ? null
+      : this.public(participant);
+  }
+
   snapshotMessage(): Extract<ServerMessage, { type: 'session.snapshot' }> {
     return {
       type: 'session.snapshot',

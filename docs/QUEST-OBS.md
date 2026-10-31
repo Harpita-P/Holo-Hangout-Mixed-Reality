@@ -5,7 +5,7 @@
 - **HoloHangout World:** local WebXR experience at `https://localhost:8081/`.
 - **HoloHangout Capture:** [ready-to-install Quest APK](../release/HoloHangout-Capture.apk) that captures the compositor after explicit Android consent.
 
-The APK is debug-signed for direct sideloading and uses package ID `com.chatirl.capture` to preserve compatibility with existing installations. It does not require Android Studio.
+The prebuilt APK is intended for local sideloading and uses package ID `com.chatirl.capture` to preserve compatibility with existing installations. Streamers do not need Android Studio or an Android build environment.
 
 ## Install the APK
 

@@ -43,6 +43,7 @@ import {
   type ReactionType,
   type ServerMessage,
 } from '../shared/protocol.js';
+import type { CommunitySandboxSnapshot, SandboxRequestSnapshot } from '../shared/community-sandbox.js';
 import { ChatIRLSocket, type SocketStatus } from './chatirl-socket.js';
 import { ShoutoutTracker } from '../shared/shoutout-tracker.js';
 import {
@@ -72,6 +73,12 @@ interface AvatarRuntime {
   bubbleText: string;
   bubbleShownAt: number;
   bubbleExpiresAt: number;
+  sandboxRequest: SandboxRequestSnapshot | null;
+  sandboxBubble: Sprite | null;
+  sandboxBubbleSecond: number;
+  sandboxApprovalSent: boolean;
+  sandboxApprovalAttemptAt: number;
+  heldStartedAt: number;
   impact: PaintImpact | null;
   hitStartedAt: number;
   hitRespawnAt: number;
@@ -182,6 +189,7 @@ export class ViewerAvatarSystem extends createSystem({
   private readonly messageQueue: ServerMessage[] = [];
   private readonly runtimes = new Map<Entity, AvatarRuntime>();
   private readonly userEntities = new Map<string, Entity>();
+  private readonly sandboxRequests = new Map<string, SandboxRequestSnapshot>();
   private readonly slots: Entity[] = [];
   private socket!: ChatIRLSocket;
   private grabSystem: GrabSystem | null = null;
@@ -194,6 +202,7 @@ export class ViewerAvatarSystem extends createSystem({
   private leaderboardCanvas: HTMLCanvasElement | null = null;
   private bannerPanel: Sprite | null = null;
   private bannerCanvas: HTMLCanvasElement | null = null;
+  private bannerArtwork: HTMLImageElement | null = null;
   private readonly reactionEffects: ReactionEffect[] = [];
   private readonly shoutoutTracker = new ShoutoutTracker();
   private readonly shoutoutEffects: ShoutoutEffect[] = [];
@@ -217,6 +226,9 @@ export class ViewerAvatarSystem extends createSystem({
       const runtime = this.runtimes.get(entity);
       if (runtime != null) {
         runtime.held = true;
+        runtime.heldStartedAt = this.currentTime;
+        runtime.sandboxApprovalSent = false;
+        runtime.sandboxApprovalAttemptAt = 0;
         entity.setValue(MonsterAvatar, 'state', MonsterStates.Held);
         this.playFirstAvailable(runtime, ['HitReact', 'HitRecieve'], false, this.currentTime);
       }
@@ -276,6 +288,7 @@ export class ViewerAvatarSystem extends createSystem({
     for (const [entity, runtime] of this.runtimes) {
       this.syncPaintballHit(runtime, time);
       this.updateBubble(runtime, time);
+      this.updateSandboxRequest(runtime, time);
       if (runtime.hitRespawnAt > 0) {
         this.updatePaintballHit(runtime, time);
         continue;
@@ -321,6 +334,12 @@ export class ViewerAvatarSystem extends createSystem({
       bubbleText: '',
       bubbleShownAt: 0,
       bubbleExpiresAt: 0,
+      sandboxRequest: null,
+      sandboxBubble: null,
+      sandboxBubbleSecond: -1,
+      sandboxApprovalSent: false,
+      sandboxApprovalAttemptAt: 0,
+      heldStartedAt: 0,
       impact: null,
       hitStartedAt: 0,
       hitRespawnAt: 0,
@@ -396,6 +415,26 @@ export class ViewerAvatarSystem extends createSystem({
       case 'hangout.moment':
         this.showMomentNotice(message.clipId, time);
         break;
+      case 'sandbox.snapshot':
+        this.reconcileSandbox(message.sandbox);
+        this.forwardSandboxMessage(message);
+        break;
+      case 'sandbox.request':
+        this.setSandboxRequest(message.request);
+        break;
+      case 'sandbox.request.removed':
+        this.clearSandboxRequest(message.userId, message.requestId);
+        break;
+      case 'sandbox.creation.ready':
+        this.clearSandboxRequest(message.creation.userId, message.creation.requestId);
+        this.forwardSandboxMessage(message);
+        break;
+      case 'sandbox.cleared':
+        this.forwardSandboxMessage(message);
+        break;
+      case 'sandbox.notice':
+        this.showWorldNotice(message.text, time);
+        break;
     }
   }
 
@@ -450,6 +489,10 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.leavingAt = 0;
     this.applyColor(object, participant.colorHex);
     this.setLabel(runtime, participant.displayName, participant.isBot);
+    const sandboxRequest = this.sandboxRequests.get(participant.userId);
+    if (sandboxRequest != null && runtime.sandboxRequest?.id !== sandboxRequest.id) {
+      this.attachSandboxRequest(runtime, sandboxRequest);
+    }
     if (!wasVisible && participant.behavior === AvatarBehaviors.Idle) {
       const idleClip = MONSTER_AUTONOMY_CLIPS[monster.category].idle;
       this.playClip(runtime, idleClip, true, time);
@@ -581,6 +624,7 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.actionStartedAt = time;
     runtime.leavingAt = time + Math.max(0, Math.min(deadlineMs, 1000)) / 1000;
     this.removeBubble(runtime);
+    this.removeSandboxBubble(runtime);
     this.playClip(runtime, 'Death', false, time);
     if (this.queries.held.entities.has(entity)) this.grabSystem?.forceRelease(entity);
   }
@@ -609,6 +653,7 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.lastHitSequence = 0;
     this.removePaintSplatter(runtime);
     this.removeBubble(runtime);
+    this.removeSandboxBubble(runtime);
     this.removeLabel(runtime);
     this.userEntities.delete(userId);
   }
@@ -1101,6 +1146,7 @@ export class ViewerAvatarSystem extends createSystem({
   }
 
   private showBubble(userId: string, text: string, time: number): void {
+    if (text.trimStart().startsWith('!')) return;
     const entity = this.userEntities.get(userId);
     const runtime = entity == null ? null : this.runtimes.get(entity);
     if (
@@ -1186,6 +1232,180 @@ export class ViewerAvatarSystem extends createSystem({
     runtime.bubbleText = '';
     runtime.bubbleShownAt = 0;
     runtime.bubbleExpiresAt = 0;
+  }
+
+  private reconcileSandbox(snapshot: CommunitySandboxSnapshot): void {
+    this.sandboxRequests.clear();
+    for (const runtime of this.runtimes.values()) {
+      runtime.sandboxRequest = null;
+      runtime.sandboxApprovalSent = false;
+      runtime.sandboxApprovalAttemptAt = 0;
+      this.removeSandboxBubble(runtime);
+    }
+    for (const request of [...snapshot.pending, ...snapshot.generating]) {
+      this.setSandboxRequest(request);
+    }
+  }
+
+  private setSandboxRequest(request: SandboxRequestSnapshot): void {
+    this.sandboxRequests.set(request.userId, request);
+    const entity = this.userEntities.get(request.userId);
+    const runtime = entity == null ? null : this.runtimes.get(entity);
+    if (runtime == null) return;
+    this.attachSandboxRequest(runtime, request);
+  }
+
+  private attachSandboxRequest(runtime: AvatarRuntime, request: SandboxRequestSnapshot): void {
+    runtime.sandboxRequest = request;
+    runtime.sandboxApprovalSent = request.status === 'generating';
+    runtime.sandboxApprovalAttemptAt = 0;
+    runtime.sandboxBubbleSecond = -1;
+    this.drawSandboxBubble(runtime);
+  }
+
+  private clearSandboxRequest(userId: string, requestId: string): void {
+    if (this.sandboxRequests.get(userId)?.id === requestId) this.sandboxRequests.delete(userId);
+    const entity = this.userEntities.get(userId);
+    const runtime = entity == null ? null : this.runtimes.get(entity);
+    if (runtime == null || runtime.sandboxRequest?.id !== requestId) return;
+    runtime.sandboxRequest = null;
+    runtime.sandboxApprovalSent = false;
+    runtime.sandboxApprovalAttemptAt = 0;
+    this.removeSandboxBubble(runtime);
+  }
+
+  private updateSandboxRequest(runtime: AvatarRuntime, time: number): void {
+    const request = runtime.sandboxRequest;
+    if (request == null) return;
+    if (
+      request.status === 'pending' && runtime.held &&
+      time - runtime.heldStartedAt >= 0.42 && time >= runtime.sandboxApprovalAttemptAt
+    ) {
+      runtime.sandboxApprovalSent = true;
+      runtime.sandboxApprovalAttemptAt = time + 0.75;
+      const userId = runtime.entity.getValue(ViewerAvatar, 'userId');
+      if (userId) this.socket.send({ type: 'sandbox.approve', requestId: request.id, userId });
+    }
+    const second = request.status === 'pending'
+      ? Math.max(0, Math.ceil((request.expiresAt - Date.now()) / 1000))
+      : -1;
+    if (second !== runtime.sandboxBubbleSecond) this.drawSandboxBubble(runtime, second);
+  }
+
+  private drawSandboxBubble(runtime: AvatarRuntime, second?: number): void {
+    const request = runtime.sandboxRequest;
+    const object = runtime.entity.object3D;
+    if (request == null || object == null) return;
+    this.removeSandboxBubble(runtime);
+    const remaining = second ?? Math.max(0, Math.ceil((request.expiresAt - Date.now()) / 1000));
+    const canvas = document.createElement('canvas');
+    canvas.width = 720;
+    canvas.height = 430;
+    const context = canvas.getContext('2d');
+    if (context == null) return;
+    context.shadowColor = 'rgba(31, 24, 54, 0.28)';
+    context.shadowBlur = 18;
+    context.shadowOffsetY = 8;
+    context.fillStyle = '#F6F1FF';
+    context.strokeStyle = request.status === 'generating' ? '#39B980' : '#6DD6D2';
+    context.lineWidth = 12;
+    context.beginPath();
+    context.roundRect(24, 20, 672, 330, 54);
+    context.moveTo(318, 344);
+    context.lineTo(360, 406);
+    context.lineTo(402, 344);
+    context.closePath();
+    context.fill();
+    context.stroke();
+    context.shadowColor = 'transparent';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillStyle = request.status === 'generating' ? '#16865B' : '#6A4EB4';
+    context.font = '800 36px system-ui, sans-serif';
+    context.fillText(request.status === 'generating' ? '✓ APPROVED' : '✦ BUILD REQUEST ✦', 360, 70);
+    context.fillStyle = '#26333A';
+    context.font = '700 31px system-ui, sans-serif';
+    context.fillText(
+      request.status === 'generating'
+        ? `${request.displayName}'s creation`
+        : `${request.displayName} wants to build:`,
+      360,
+      125,
+      620,
+    );
+    context.fillStyle = '#7049C8';
+    context.font = '900 47px system-ui, sans-serif';
+    const title = request.prompt.replace(/(^|\s)\p{L}/gu, (value) => value.toUpperCase());
+    context.fillText(title, 360, 193, 620);
+    context.fillStyle = '#26333A';
+    context.font = '750 34px system-ui, sans-serif';
+    context.fillText(request.status === 'generating' ? '🔨 Building creation…' : 'Pick me up to approve!', 360, 260, 620);
+    if (request.status === 'pending') {
+      context.fillStyle = '#148D8A';
+      context.font = '900 43px system-ui, sans-serif';
+      context.fillText(`${remaining}s`, 360, 314);
+    }
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.minFilter = LinearFilter;
+    const bubble = new Sprite(new SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+    bubble.name = 'Community Sandbox Build Request';
+    const hover = runtime.monster?.category === MonsterCategories.Flying ? 0.06 : 0;
+    bubble.position.set(0, (runtime.monster?.targetHeight ?? 0.18) + hover + 0.25, 0);
+    bubble.scale.set(0.34, 0.203, 1);
+    bubble.renderOrder = 23;
+    object.add(bubble);
+    runtime.sandboxBubble = bubble;
+    runtime.sandboxBubbleSecond = request.status === 'pending' ? remaining : -1;
+  }
+
+  private removeSandboxBubble(runtime: AvatarRuntime): void {
+    const bubble = runtime.sandboxBubble;
+    if (bubble == null) return;
+    bubble.removeFromParent();
+    bubble.material.map?.dispose();
+    bubble.material.dispose();
+    runtime.sandboxBubble = null;
+  }
+
+  private forwardSandboxMessage(message: ServerMessage): void {
+    window.dispatchEvent(new CustomEvent('holohangout:sandbox-message', { detail: message }));
+  }
+
+  private showWorldNotice(text: string, time: number): void {
+    const parent = this.slots[0]?.object3D?.parent;
+    if (parent == null) return;
+    this.removeWelcomeNotice();
+    const canvas = document.createElement('canvas');
+    canvas.width = 768;
+    canvas.height = 180;
+    const context = canvas.getContext('2d');
+    if (context == null) return;
+    context.shadowColor = 'rgba(52, 35, 79, 0.28)';
+    context.shadowBlur = 18;
+    context.fillStyle = 'rgba(246, 241, 255, 0.98)';
+    context.beginPath();
+    context.roundRect(18, 18, 732, 144, 48);
+    context.fill();
+    context.shadowColor = 'transparent';
+    context.strokeStyle = '#6DD6D2';
+    context.lineWidth = 7;
+    context.stroke();
+    context.fillStyle = '#5E43A5';
+    context.font = '900 54px system-ui, sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(text, 384, 90, 690);
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.minFilter = LinearFilter;
+    const sprite = new Sprite(new SpriteMaterial({ map: texture, transparent: true, depthTest: false, opacity: 0 }));
+    sprite.name = 'Community Sandbox Notice';
+    sprite.position.set(0, 0.48, -0.08);
+    sprite.scale.set(0.001, 0.001, 1);
+    sprite.renderOrder = 24;
+    parent.add(sprite);
+    this.welcomeNotice = { sprite, shownAt: time, expiresAt: time + 3.6 };
   }
 
   private showWelcomeNotice(displayName: string, monsterName: string, time: number): void {
@@ -1695,21 +1915,29 @@ export class ViewerAvatarSystem extends createSystem({
     this.leaderboardPanel = this.createWorldPanel(
       this.leaderboardCanvas,
       'Top Active Community Members',
-      new Vector3(0.61, 0.32, -0.37),
+      new Vector3(1.18, 0.5, -0.32),
       new Vector3(0.31, 0.435, 1),
     );
     parent.add(this.leaderboardPanel);
 
     this.bannerCanvas = document.createElement('canvas');
     this.bannerCanvas.width = 1024;
-    this.bannerCanvas.height = 256;
+    this.bannerCanvas.height = 512;
     this.bannerPanel = this.createWorldPanel(
       this.bannerCanvas,
       'Streamer World Banner',
-      new Vector3(0, 0.6, -0.55),
-      new Vector3(0.7, 0.175, 1),
+      new Vector3(0, 0.67, -0.55),
+      new Vector3(0.78, 0.39, 1),
     );
     parent.add(this.bannerPanel);
+    this.bannerArtwork = new Image();
+    this.bannerArtwork.decoding = 'async';
+    this.bannerArtwork.onload = () => this.renderWorldBanner();
+    this.bannerArtwork.onerror = () => {
+      console.warn('Unable to load /holohangout-banner.png; using the banner fallback.');
+      this.renderWorldBanner();
+    };
+    this.bannerArtwork.src = '/holohangout-banner.png';
     this.renderLeaderboard();
     this.renderWorldBanner();
     this.cleanupFuncs.push(() => {
@@ -1717,6 +1945,11 @@ export class ViewerAvatarSystem extends createSystem({
         panel?.removeFromParent();
         panel?.material.map?.dispose();
         panel?.material.dispose();
+      }
+      if (this.bannerArtwork != null) {
+        this.bannerArtwork.onload = null;
+        this.bannerArtwork.onerror = null;
+        this.bannerArtwork = null;
       }
     });
   }
@@ -1755,6 +1988,20 @@ export class ViewerAvatarSystem extends createSystem({
     context.strokeStyle = LEADERBOARD_COLORS.border;
     context.lineWidth = 7;
     context.stroke();
+    context.strokeStyle = 'rgba(233, 120, 24, 0.55)';
+    context.lineWidth = 3;
+    context.beginPath();
+    context.roundRect(39, 39, 562, 822, 42);
+    context.stroke();
+    context.fillStyle = LEADERBOARD_COLORS.accent;
+    for (const [x, y] of [[61, 61], [579, 61], [61, 839], [579, 839]] as const) {
+      context.beginPath();
+      context.arc(x, y, 8, 0, Math.PI * 2);
+      context.fill();
+      context.strokeStyle = LEADERBOARD_COLORS.highlight;
+      context.lineWidth = 3;
+      context.stroke();
+    }
 
     // Lightweight trophy mark drawn directly into the existing canvas texture.
     context.fillStyle = LEADERBOARD_COLORS.highlight;
@@ -1784,6 +2031,18 @@ export class ViewerAvatarSystem extends createSystem({
     context.fillStyle = LEADERBOARD_COLORS.text;
     context.font = '700 30px system-ui, sans-serif';
     context.fillText('MEMBERS', 320, 310);
+    context.strokeStyle = LEADERBOARD_COLORS.accent;
+    context.lineWidth = 4;
+    context.beginPath();
+    context.moveTo(112, 327);
+    context.lineTo(276, 327);
+    context.moveTo(364, 327);
+    context.lineTo(528, 327);
+    context.stroke();
+    context.fillStyle = LEADERBOARD_COLORS.highlight;
+    context.beginPath();
+    context.arc(320, 327, 10, 0, Math.PI * 2);
+    context.fill();
 
     if (this.communityEntries.length === 0) {
       context.fillStyle = LEADERBOARD_COLORS.mutedText;
@@ -1848,40 +2107,48 @@ export class ViewerAvatarSystem extends createSystem({
     const context = canvas?.getContext('2d');
     if (canvas == null || panel == null || context == null) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
-    context.shadowColor = 'rgba(70, 52, 40, 0.22)';
-    context.shadowBlur = 16;
-    context.fillStyle = 'rgba(255, 249, 240, 0.98)';
-    context.beginPath();
-    context.roundRect(18, 18, 988, 220, 62);
-    context.fill();
-    context.shadowColor = 'transparent';
-    context.strokeStyle = '#D7C7B8';
-    context.lineWidth = 6;
-    context.stroke();
+    const artwork = this.bannerArtwork;
+    if (artwork?.complete && artwork.naturalWidth > 0) {
+      context.drawImage(artwork, 0, 0, canvas.width, canvas.height);
+    } else {
+      context.fillStyle = '#2B0E03';
+      context.beginPath();
+      context.roundRect(105, 148, 814, 220, 44);
+      context.fill();
+      context.strokeStyle = '#FFCD18';
+      context.lineWidth = 14;
+      context.stroke();
+    }
 
     const username = this.broadcasterLogin ?? 'streamer';
-    const prefix = 'Hang Out in';
+    const prefix = 'Welcome to';
     const suffix = "'s World!";
+    context.shadowColor = 'rgba(30, 8, 0, 0.82)';
+    context.shadowBlur = 8;
+    context.shadowOffsetY = 4;
     context.textAlign = 'center';
-    context.fillStyle = '#2C3434';
-    context.font = '900 66px system-ui, sans-serif';
-    context.fillText(prefix, 512, 104);
+    context.fillStyle = '#FFFFFF';
+    context.font = '900 58px system-ui, sans-serif';
+    context.fillText(prefix, 512, 270);
 
-    let secondLineSize = 66;
+    let secondLineSize = 60;
     context.font = `900 ${secondLineSize}px system-ui, sans-serif`;
     const desiredWidth = context.measureText(`${username}${suffix}`).width;
-    if (desiredWidth > 900) secondLineSize = Math.max(44, secondLineSize * (900 / desiredWidth));
+    if (desiredWidth > 790) secondLineSize = Math.max(40, secondLineSize * (790 / desiredWidth));
     context.font = `900 ${secondLineSize}px system-ui, sans-serif`;
     const usernameWidth = context.measureText(username).width;
     const suffixWidth = context.measureText(suffix).width;
     let x = (canvas.width - usernameWidth - suffixWidth) / 2;
     context.textAlign = 'left';
-    context.fillStyle = '#C94F78';
-    context.fillText(username, x, 183);
+    context.fillStyle = '#FFF1A8';
+    context.fillText(username, x, 346);
     x += usernameWidth;
-    context.fillStyle = '#2C3434';
-    context.fillText(suffix, x, 183);
+    context.fillStyle = '#FFFFFF';
+    context.fillText(suffix, x, 346);
     context.textAlign = 'center';
+    context.shadowColor = 'transparent';
+    context.shadowBlur = 0;
+    context.shadowOffsetY = 0;
     if (panel.material.map != null) panel.material.map.needsUpdate = true;
   }
 

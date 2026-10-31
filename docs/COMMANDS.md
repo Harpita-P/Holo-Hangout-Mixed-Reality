@@ -5,6 +5,7 @@ Only joined viewers control avatars or display speech bubbles. Commands are matc
 ## Everyone
 
 - `!join` — join the world; repeated joins do not duplicate an active avatar.
+- `!build <description>` — while Community Sandbox is active, request a miniature voxel creation. The streamer must pick up your monster within 15 seconds to approve it.
 - `!blast` — fire a chat projectile during the Streamer vs. Chat challenge.
 - `!support`, `!like`, `!fire` — community reactions.
 - `!leave` — release and remove the viewer avatar promptly, even while held.

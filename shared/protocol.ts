@@ -1,4 +1,5 @@
 import type { MonsterCategory, MonsterType } from './monsters.js';
+import type { CommunitySandboxSnapshot, SandboxCreationSnapshot, SandboxRequestSnapshot } from './community-sandbox.js';
 
 export const AvatarBehaviors = {
   Idle: 'idle',
@@ -67,6 +68,12 @@ export type ServerMessage =
   | { type: 'avatar.removed'; userId: string }
   | { type: 'community.leaderboard'; entries: CommunityLeaderboardEntry[] }
   | { type: 'hangout.moment'; clipId: string }
+  | { type: 'sandbox.snapshot'; sandbox: CommunitySandboxSnapshot }
+  | { type: 'sandbox.request'; request: SandboxRequestSnapshot }
+  | { type: 'sandbox.request.removed'; requestId: string; userId: string }
+  | { type: 'sandbox.creation.ready'; creation: SandboxCreationSnapshot }
+  | { type: 'sandbox.cleared' }
+  | { type: 'sandbox.notice'; text: string }
   | {
       type: 'server.status';
       twitchConnected: boolean;
@@ -76,6 +83,7 @@ export type ServerMessage =
 export type ClientMessage =
   | { type: 'client.ready' }
   | { type: 'avatar.held'; userId: string; held: boolean }
+  | { type: 'sandbox.approve'; requestId: string; userId: string }
   | { type: 'challenge.completed'; challengeId: string };
 
 export function isClientMessage(value: unknown): value is ClientMessage {
@@ -88,6 +96,10 @@ export function isClientMessage(value: unknown): value is ClientMessage {
   }
   if (candidate.type === 'challenge.completed') {
     return typeof candidate.challengeId === 'string' && candidate.challengeId.length <= 100;
+  }
+  if (candidate.type === 'sandbox.approve') {
+    return typeof candidate.requestId === 'string' && candidate.requestId.length <= 100 &&
+      typeof candidate.userId === 'string' && candidate.userId.length <= 100;
   }
   return (
     candidate.type === 'avatar.held' &&

@@ -4,6 +4,7 @@ import { ViewerAvatarSystem } from './viewer-avatar-system.js';
 import { PaintballBlasterSystem } from './paintball-blaster-system.js';
 import { FloatingTerrainSystem } from './floating-terrain-system.js';
 import { IslandBeeSystem } from './island-bee-system.js';
+import { CommunitySandboxSystem } from './community-sandbox-system.js';
 
 const container = document.getElementById('scene-container');
 
@@ -13,6 +14,7 @@ if (!(container instanceof HTMLDivElement)) {
 
 World.create(container, projectOptions)
   .then((world) => {
+    world.registerSystem(CommunitySandboxSystem);
     world.registerSystem(ViewerAvatarSystem);
     world.registerSystem(PaintballBlasterSystem);
     world.registerSystem(FloatingTerrainSystem);

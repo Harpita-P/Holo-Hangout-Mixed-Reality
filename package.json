@@ -1,6 +1,7 @@
 {
   "name": "holohangout",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
@@ -35,6 +36,7 @@
     "@iwsdk/core": "1.1.0-rc.2",
     "dotenv": "^18.0.9",
     "obs-websocket-js": "^5.0.8",
+    "openai": "^7.47.0",
     "three": "npm:super-three@0.185.0",
     "ws": "^8.22.0"
   },

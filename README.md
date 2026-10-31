@@ -17,12 +17,14 @@ HoloHangout brings Twitch viewers into a streamer's mixed-reality world as anima
 - Physically grab characters, give community shoutouts, and play the blaster challenge.
 - Broadcast actual Quest passthrough, hands, avatars, and interactions through OBS.
 - Create Twitch clips with Hangout Moments.
+- Open Community Sandbox and physically approve viewer ideas that become grabbable voxel sculptures.
 
 ### For viewers
 
 - Join from ordinary Twitch chat with `!join`; no headset or installation needed.
 - Appear as an animated character with individual actions.
 - Chat through in-world speech bubbles and participate in community challenges.
+- Submit a miniature creation idea with `!build <description>` while Community Sandbox is open.
 
 ## Requirements
 
@@ -95,9 +97,10 @@ Everything stays on the streamer's Mac and USB-connected Quest except Twitch's n
 - [Twitch application and authorization](docs/TWITCH.md)
 - [Quest Capture and OBS](docs/QUEST-OBS.md)
 - [Viewer chat commands](docs/COMMANDS.md)
+- [Community Sandbox setup and limits](docs/COMMUNITY-SANDBOX.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Architecture and development](docs/DEVELOPMENT.md)
-- [Licensing and asset review](docs/ATTRIBUTION.md)
+- [Third-party notices](docs/THIRD-PARTY-NOTICES.md)
 
 ## Contributing
 
@@ -105,4 +108,4 @@ Please run `npm run check`, `npm run typecheck`, `npm test`, and `npm run build`
 
 ## License and acknowledgements
 
-No project-wide open-source license has been selected yet. Third-party model and environment redistribution rights also require confirmation. **Do not publish or redistribute this repository as an open-source release until the items in [docs/ATTRIBUTION.md](docs/ATTRIBUTION.md) are resolved.**
+HoloHangout is open-source software released under the [MIT License](LICENSE). Dependencies and bundled assets remain subject to their applicable licenses; see [Third-party notices](docs/THIRD-PARTY-NOTICES.md).

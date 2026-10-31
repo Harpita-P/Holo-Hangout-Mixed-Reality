@@ -4,6 +4,7 @@ import { ViewerAvatar } from './viewer-avatar-component.js';
 import { PaintballBlaster } from './paintball-blaster-component.js';
 import { FloatingTerrain } from './floating-terrain-component.js';
 import { IslandBee } from './island-bee-component.js';
+import { CommunitySandboxCreation } from './community-sandbox-component.js';
 
 export default defineComponents([
   ViewerAvatar,
@@ -11,4 +12,5 @@ export default defineComponents([
   PaintballBlaster,
   FloatingTerrain,
   IslandBee,
+  CommunitySandboxCreation,
 ]);

@@ -1,8 +1,10 @@
 import {
+  AdditiveBlending,
   CanvasTexture,
   createSystem,
   type Entity,
   Grabbed,
+  Group,
   LinearFilter,
   Mesh,
   MeshBasicMaterial,
@@ -28,14 +30,42 @@ const PROJECTILE_SPEED = 2.4;
 const PROJECTILE_RANGE = 3;
 const ROUND_SECONDS = 60;
 const projectileGeometry = new SphereGeometry(0.026, 12, 8);
-const projectileMaterial = new MeshBasicMaterial({ color: '#FF3F9B' });
+const projectileMaterial = new MeshBasicMaterial({
+  color: '#FF3F9B',
+  transparent: true,
+  opacity: 0.94,
+  depthWrite: false,
+  toneMapped: false,
+});
+const projectileGlowMaterial = new MeshBasicMaterial({
+  color: '#FF9BD5',
+  transparent: true,
+  opacity: 0.42,
+  depthWrite: false,
+  blending: AdditiveBlending,
+  toneMapped: false,
+});
 const chatProjectileGeometry = new SphereGeometry(0.032, 12, 8);
-const chatProjectileMaterial = new MeshBasicMaterial({ color: '#32D9FF' });
+const chatProjectileMaterial = new MeshBasicMaterial({
+  color: '#32D9FF',
+  transparent: true,
+  opacity: 0.94,
+  depthWrite: false,
+  toneMapped: false,
+});
+const chatProjectileGlowMaterial = new MeshBasicMaterial({
+  color: '#8CEBFF',
+  transparent: true,
+  opacity: 0.42,
+  depthWrite: false,
+  blending: AdditiveBlending,
+  toneMapped: false,
+});
 const CHAT_PROJECTILE_SPEED = 1.55;
 const CHAT_PROJECTILE_RANGE = 4;
 
 interface PaintballProjectile {
-  mesh: Mesh;
+  mesh: Group;
   blaster: Entity;
   target: Entity | null;
   hitDistance: number;
@@ -51,10 +81,16 @@ interface HitPopup {
 }
 
 interface ChatBlastProjectile {
-  mesh: Mesh;
+  mesh: Group;
   previous: Vector3;
   direction: Vector3;
   distance: number;
+  burstShown: boolean;
+}
+
+interface EnergyBurst {
+  sprite: Sprite;
+  startedAt: number;
 }
 
 export class PaintballBlasterSystem extends createSystem({
@@ -81,6 +117,8 @@ export class PaintballBlasterSystem extends createSystem({
   private hitPopupTexture: CanvasTexture | null = null;
   private readonly hitPopups: HitPopup[] = [];
   private readonly chatProjectiles: ChatBlastProjectile[] = [];
+  private readonly energyBursts: EnergyBurst[] = [];
+  private chatBurstTexture: CanvasTexture | null = null;
   private readonly onSelect = (): void => this.fire();
   private readonly onSessionStart = (): void => this.bindSession();
   private readonly onViewerBlast = (event: Event): void => {
@@ -92,6 +130,7 @@ export class PaintballBlasterSystem extends createSystem({
     this.world.renderer.xr.addEventListener('sessionstart', this.onSessionStart);
     this.bindSession();
     this.createHud();
+    this.chatBurstTexture = createEnergyBurstTexture();
     window.addEventListener('holohangout:viewer-blast', this.onViewerBlast);
     const offPickup = this.queries.heldBlasters.subscribe('qualify', () => this.startRound());
     const offRelease = this.queries.heldBlasters.subscribe('disqualify', () => this.stopRound());
@@ -103,6 +142,13 @@ export class PaintballBlasterSystem extends createSystem({
       this.projectiles.length = 0;
       for (const projectile of this.chatProjectiles) projectile.mesh.removeFromParent();
       this.chatProjectiles.length = 0;
+      for (const burst of this.energyBursts) {
+        burst.sprite.removeFromParent();
+        burst.sprite.material.dispose();
+      }
+      this.energyBursts.length = 0;
+      this.chatBurstTexture?.dispose();
+      this.chatBurstTexture = null;
       this.disposeHud();
     });
     this.cleanupFuncs.push(offPickup, offRelease);
@@ -118,6 +164,7 @@ export class PaintballBlasterSystem extends createSystem({
     }
     this.updateProjectiles(Math.min(delta, 1 / 15), time);
     this.updateChatProjectiles(Math.min(delta, 1 / 15));
+    this.updateEnergyBursts(time);
     this.updateHud(time);
     this.updateHitPopups(time);
   }
@@ -152,8 +199,13 @@ export class PaintballBlasterSystem extends createSystem({
     const ray = new Ray(origin, direction);
     const hit = this.closestAvatarHit(ray, origin, time);
     if (hit != null) this.hitCooldowns.set(hit.entity.index, time + HIT_COOLDOWN_SECONDS);
-    const mesh = new Mesh(projectileGeometry, projectileMaterial);
-    mesh.name = 'Pink Paintball Projectile';
+    const mesh = createEnergyProjectile(
+      'Pink Fireball Projectile',
+      projectileGeometry,
+      projectileMaterial,
+      projectileGlowMaterial,
+      direction,
+    );
     mesh.position.copy(origin);
     mesh.renderOrder = 25;
     this.world.scene.add(mesh);
@@ -207,8 +259,13 @@ export class PaintballBlasterSystem extends createSystem({
     target.y -= 0.06;
     const direction = target.sub(origin).normalize();
     if (direction.lengthSq() === 0) return;
-    const mesh = new Mesh(chatProjectileGeometry, chatProjectileMaterial);
-    mesh.name = `Chat Cyan Blast — ${userId}`;
+    const mesh = createEnergyProjectile(
+      `Chat Blue Fireball — ${userId}`,
+      chatProjectileGeometry,
+      chatProjectileMaterial,
+      chatProjectileGlowMaterial,
+      direction,
+    );
     mesh.position.copy(origin);
     mesh.renderOrder = 26;
     this.world.scene.add(mesh);
@@ -217,6 +274,7 @@ export class PaintballBlasterSystem extends createSystem({
       previous: origin.clone(),
       direction,
       distance: 0,
+      burstShown: false,
     });
   }
 
@@ -232,6 +290,14 @@ export class PaintballBlasterSystem extends createSystem({
       const step = CHAT_PROJECTILE_SPEED * delta;
       projectile.distance += step;
       projectile.mesh.position.addScaledVector(projectile.direction, step);
+      const nearStreamer = Math.min(
+        projectile.mesh.position.distanceTo(headCenter),
+        projectile.mesh.position.distanceTo(torsoCenter),
+      ) <= 0.34;
+      if (nearStreamer && !projectile.burstShown) {
+        projectile.burstShown = true;
+        this.createChatEnergyBurst(projectile.mesh.position);
+      }
       const hitStreamer =
         segmentHitsSphere(projectile.previous, projectile.mesh.position, headCenter, 0.14) ||
         segmentHitsSphere(projectile.previous, projectile.mesh.position, torsoCenter, 0.2);
@@ -248,6 +314,40 @@ export class PaintballBlasterSystem extends createSystem({
         projectile.mesh.removeFromParent();
         this.chatProjectiles.splice(index, 1);
       }
+    }
+  }
+
+  private createChatEnergyBurst(position: Vector3): void {
+    if (this.chatBurstTexture == null) return;
+    const sprite = new Sprite(new SpriteMaterial({
+      map: this.chatBurstTexture,
+      transparent: true,
+      depthTest: false,
+      opacity: 1,
+      blending: AdditiveBlending,
+    }));
+    sprite.name = 'Chat Blue Energy Burst';
+    sprite.position.copy(position);
+    sprite.scale.set(0.1, 0.1, 1);
+    sprite.renderOrder = 40;
+    this.world.scene.add(sprite);
+    this.energyBursts.push({ sprite, startedAt: this.currentTime });
+  }
+
+  private updateEnergyBursts(time: number): void {
+    for (let index = this.energyBursts.length - 1; index >= 0; index -= 1) {
+      const burst = this.energyBursts[index];
+      const elapsed = time - burst.startedAt;
+      if (elapsed >= 0.42) {
+        burst.sprite.removeFromParent();
+        burst.sprite.material.dispose();
+        this.energyBursts.splice(index, 1);
+        continue;
+      }
+      const progress = Math.max(0, elapsed / 0.42);
+      const scale = 0.1 + progress * 0.2;
+      burst.sprite.scale.set(scale, scale, 1);
+      burst.sprite.material.opacity = 1 - progress;
     }
   }
 
@@ -393,10 +493,30 @@ export class PaintballBlasterSystem extends createSystem({
     context.font = '900 120px system-ui, sans-serif';
     context.textAlign = 'left';
     context.fillText(`00:${String(seconds).padStart(2, '0')}`, 218, 165);
+    context.shadowColor = 'rgba(25, 5, 12, 0.2)';
+    context.shadowBlur = 8;
+    context.fillStyle = '#944755';
+    context.beginPath();
+    context.roundRect(58, 194, 270, 66, 22);
+    context.fill();
+    context.strokeStyle = '#FFC2D4';
+    context.lineWidth = 4;
+    context.stroke();
+    context.fillStyle = '#245B83';
+    context.beginPath();
+    context.roundRect(440, 194, 270, 66, 22);
+    context.fill();
+    context.strokeStyle = '#76E7FF';
+    context.stroke();
+    context.shadowColor = 'transparent';
     context.fillStyle = '#FFFFFF';
-    context.font = '800 50px system-ui, sans-serif';
+    context.font = '800 38px system-ui, sans-serif';
     context.textAlign = 'center';
-    context.fillText(`STREAMER ${this.roundHits}   VS   CHAT ${this.chatHits}`, 384, 245);
+    context.fillText(`STREAMER  ${this.roundHits}`, 193, 239);
+    context.fillText(`CHAT  ${this.chatHits}`, 575, 239);
+    context.fillStyle = '#FFFFFF';
+    context.font = '900 28px system-ui, sans-serif';
+    context.fillText('VS', 384, 237);
     if (this.winnerMessage && this.currentTime < this.winnerUntil) {
       context.fillStyle = '#FFE179';
       context.font = '900 28px system-ui, sans-serif';
@@ -498,4 +618,58 @@ export class PaintballBlasterSystem extends createSystem({
 function createChallengeId(): string {
   return globalThis.crypto?.randomUUID?.() ??
     `challenge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createEnergyProjectile(
+  name: string,
+  geometry: SphereGeometry,
+  coreMaterial: MeshBasicMaterial,
+  glowMaterial: MeshBasicMaterial,
+  direction: Vector3,
+): Group {
+  const root = new Group();
+  root.name = name;
+  root.quaternion.setFromUnitVectors(new Vector3(0, 0, -1), direction);
+
+  const core = new Mesh(geometry, coreMaterial);
+  core.name = `${name} Core`;
+  core.scale.set(1, 1, 1.35);
+  const glow = new Mesh(geometry, glowMaterial);
+  glow.name = `${name} Glow`;
+  glow.scale.set(1.65, 1.65, 2.05);
+  const tail = new Mesh(geometry, glowMaterial);
+  tail.name = `${name} Tail`;
+  tail.position.z = 0.052;
+  tail.scale.set(0.9, 0.9, 1.7);
+  const ember = new Mesh(geometry, glowMaterial);
+  ember.name = `${name} Ember`;
+  ember.position.z = 0.09;
+  ember.scale.set(0.48, 0.48, 0.9);
+  root.add(glow, tail, ember, core);
+  return root;
+}
+
+function createEnergyBurstTexture(): CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const context = canvas.getContext('2d');
+  if (context != null) {
+    const gradient = context.createRadialGradient(128, 128, 8, 128, 128, 118);
+    gradient.addColorStop(0, 'rgba(235, 253, 255, 1)');
+    gradient.addColorStop(0.24, 'rgba(80, 220, 255, 0.95)');
+    gradient.addColorStop(0.58, 'rgba(23, 132, 255, 0.55)');
+    gradient.addColorStop(1, 'rgba(20, 95, 255, 0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 256, 256);
+    context.strokeStyle = 'rgba(150, 245, 255, 0.8)';
+    context.lineWidth = 9;
+    context.beginPath();
+    context.arc(128, 128, 76, 0, Math.PI * 2);
+    context.stroke();
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.minFilter = LinearFilter;
+  return texture;
 }
