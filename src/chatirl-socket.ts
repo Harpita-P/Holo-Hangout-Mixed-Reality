@@ -36,17 +36,9 @@ export class ChatIRLSocket {
   private connect(): void {
     if (this.closed) return;
     this.onStatus('connecting');
-    const configured =
-      import.meta.env.VITE_HOLOHANGOUT_WS_URL?.trim() ||
-      import.meta.env.VITE_CHATIRL_WS_URL?.trim();
+    const configured = import.meta.env.VITE_CHATIRL_WS_URL?.trim();
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = new URL(configured || `${protocol}//${window.location.host}/chatirl`);
-    const worldMatch = window.location.pathname.match(/^\/world\/([^/]+)\/?$/u);
-    const credential = new URLSearchParams(window.location.hash.slice(1)).get('credential');
-    if (worldMatch != null && credential != null) {
-      url.searchParams.set('world', decodeURIComponent(worldMatch[1] ?? ''));
-      url.searchParams.set('credential', credential);
-    }
+    const url = configured || `${protocol}//${window.location.host}/chatirl`;
     const socket = new WebSocket(url);
     this.socket = socket;
 

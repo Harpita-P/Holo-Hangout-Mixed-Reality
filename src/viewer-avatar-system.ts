@@ -1900,8 +1900,8 @@ export class ViewerAvatarSystem extends createSystem({
     this.statusElement.textContent = this.twitchConnected
       ? `Twitch connected: ${this.broadcasterLogin ?? 'streamer'}`
       : this.backendConnected
-        ? 'HoloHangout backend connected — authorize Twitch'
-        : 'HoloHangout backend offline';
+        ? 'ChatIRL backend connected — authorize Twitch'
+        : 'ChatIRL backend offline';
   }
 }
 

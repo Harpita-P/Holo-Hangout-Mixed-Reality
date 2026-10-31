@@ -201,7 +201,7 @@ export class TwitchEventSub {
   disconnect(): void {
     this.stopped = true;
     this.clearTimers();
-    this.socket?.close(1000, 'HoloHangout server stopped');
+    this.socket?.close(1000, 'ChatIRL server stopped');
     this.socket = null;
     this.outboundMessages.length = 0;
   }
@@ -280,7 +280,7 @@ export class TwitchEventSub {
         break;
       }
       case 'revocation':
-        this.lastError = 'Twitch revoked the chat subscription. Reauthorize HoloHangout.';
+        this.lastError = 'Twitch revoked the chat subscription. Reauthorize ChatIRL.';
         this.onStatus(this.status());
         break;
     }
@@ -333,7 +333,7 @@ export class TwitchEventSub {
     }
     for (const scope of ['user:read:chat', 'user:write:chat']) {
       if (!validation.scopes.includes(scope)) {
-        throw new Error(`Twitch token is missing ${scope}; reauthorize HoloHangout.`);
+        throw new Error(`Twitch token is missing ${scope}; reauthorize ChatIRL.`);
       }
     }
     return validation;

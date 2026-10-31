@@ -10,8 +10,6 @@
     "dev:status": "iwsdk dev status",
     "server": "node --import tsx server/index.ts",
     "server:watch": "node --watch --import tsx server/index.ts",
-    "server:platform": "DOTENV_CONFIG_PATH=.env.platform node --import tsx server/platform-server.ts",
-    "server:platform:watch": "DOTENV_CONFIG_PATH=.env.platform node --watch --import tsx server/platform-server.ts",
     "demo:on": "node --import tsx tools/demo-control.ts on",
     "demo:off": "node --import tsx tools/demo-control.ts off",
     "demo:status": "node --import tsx tools/demo-control.ts status",
