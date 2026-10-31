@@ -1,11 +1,11 @@
-# ChatIRL Phase 2.5 native Quest capture
+# HoloHangout Phase 2.5 native Quest capture
 
 This companion is a deliberately small Android app for Quest 3/3S. It requests
 the normal Horizon OS screen-capture consent, keeps that single-use projection
 inside a `mediaProjection` foreground service, sends hardware-encoded H.264 over
-TCP, and leaves ChatIRL running in Quest Browser.
+TCP, and leaves HoloHangout running in Quest Browser.
 
-It does not contain the ChatIRL scene, Twitch credentials, a Twitch stream key,
+It does not contain the HoloHangout scene, Twitch credentials, a Twitch stream key,
 or audio capture. The existing MQDH workflow remains available as a fallback.
 
 ## Data path
@@ -15,7 +15,7 @@ Horizon OS compositor (passthrough + hands + WebXR)
   -> MediaProjection surface
   -> Quest hardware H.264 encoder (1280x720, 30 FPS, 5 Mbps)
   -> TCP 127.0.0.1:49152 through adb reverse
-  -> supervised receiver in the ChatIRL Node control server
+  -> supervised receiver in the HoloHangout Node control server
   -> FFmpeg stream-copy into MPEG-TS over UDP 127.0.0.1:49153
   -> OBS Media Source
 ```
@@ -75,7 +75,7 @@ npm run capture:install
 ```
 
 The app appears under the Quest library's unknown/development sources as
-**ChatIRL Capture**. It can also be launched from the Mac:
+**HoloHangout Capture**. It can also be launched from the Mac:
 
 ```sh
 adb shell monkey -p com.chatirl.capture \
@@ -116,7 +116,7 @@ that address reaches the Mac without Wi-Fi or a LAN firewall exception.
 
 ## Configure OBS without screen capture
 
-Keep the existing `ChatIRL Live` scene and `MQDH Cast` source for fallback. In
+Keep the existing `HoloHangout Live` scene and `MQDH Cast` source for fallback. In
 the same scene:
 
 1. Add **Media Source** and name it `Quest Capture Feed`.
@@ -150,21 +150,21 @@ macOS capture source is used only when deliberately falling back.
 ## Run on Quest
 
 1. Stop MQDH casting. Horizon OS permits only one active MediaProjection session.
-2. Start the ChatIRL server and IWSDK app normally. The receiver starts with the
+2. Start the HoloHangout server and IWSDK app normally. The receiver starts with the
    control server.
 3. Open `http://localhost:8787` and select **Configure USB**. Confirm **Mac
    receiver** is listening.
-4. Open **ChatIRL Capture** on Quest.
+4. Open **HoloHangout Capture** on Quest.
 5. Leave receiver host `127.0.0.1` and port `49152` unchanged.
 6. Select **Start Capture → Entire View** and approve the Horizon OS dialog.
 7. Wait for the app status to change from **WAITING** to **STREAMING**. The
    dashboard must show **Quest connection** and **Encoded video** healthy.
-8. Select **Open ChatIRL**. The capture foreground service remains active while
+8. Select **Open HoloHangout**. The capture foreground service remains active while
    Quest Browser becomes the foreground application.
-9. Enter AR in ChatIRL. Confirm `Quest Capture Feed` is moving in OBS and the
+9. Enter AR in HoloHangout. Confirm `Quest Capture Feed` is moving in OBS and the
    dashboard's Broadcast card says **Native**.
 10. Select **Start Stream** on the dashboard. This retains the existing
-    `ChatIRL Live` scene, optional microphone delay, OBS WebSocket control, and
+    `HoloHangout Live` scene, optional microphone delay, OBS WebSocket control, and
     OBS-owned Twitch account/stream key.
 11. Select **Stop Stream** when finished, then return to the companion or use its
     persistent notification to stop capture.
@@ -210,7 +210,7 @@ but the following items require the physical Quest compositor:
 
 1. Open `https://localhost:8081/capture-test.html` for two minutes. Its timestamp
    and health chip must change continuously in OBS.
-2. Open ChatIRL, enter immersive AR, and start a Twitch broadcast from the
+2. Open HoloHangout, enter immersive AR, and start a Twitch broadcast from the
    dashboard.
 3. On a Twitch viewer account, confirm live video contains passthrough,
    tabletop, avatars, hand visualization, and physical object manipulation.

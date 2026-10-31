@@ -65,7 +65,7 @@ public final class MainActivity extends Activity {
         content.setPadding(padding, padding, padding, padding);
         content.setBackgroundColor(Color.rgb(7, 24, 29));
 
-        TextView title = text("ChatIRL Quest Capture", 28, Color.WHITE);
+        TextView title = text("HoloHangout Capture", 28, Color.WHITE);
         content.addView(title);
         content.addView(text(
                 "MediaProjection → hardware H.264 → TCP → OBS",
@@ -82,7 +82,7 @@ public final class MainActivity extends Activity {
         portInput = input("Receiver port", "49152");
         portInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         content.addView(portInput);
-        urlInput = input("ChatIRL URL", "https://localhost:8081/");
+        urlInput = input("HoloHangout URL", "https://localhost:8081/");
         content.addView(urlInput);
 
         LinearLayout actions = new LinearLayout(this);
@@ -94,7 +94,7 @@ public final class MainActivity extends Activity {
         Button stop = button("Stop Capture");
         stop.setOnClickListener((view) -> stopCapture());
         actions.addView(stop);
-        Button browser = button("Open ChatIRL");
+        Button browser = button("Open HoloHangout");
         browser.setOnClickListener((view) -> openChatIRL());
         actions.addView(browser);
         content.addView(actions);
@@ -149,9 +149,9 @@ public final class MainActivity extends Activity {
     private void openChatIRL() {
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(urlInput.getText().toString().trim())));
-            appendLog("Opened ChatIRL in Quest Browser; capture service remains active");
+            appendLog("Opened HoloHangout in Quest Browser; capture service remains active");
         } catch (Exception error) {
-            renderStatus("error", "Unable to open ChatIRL URL: " + error.getMessage());
+            renderStatus("error", "Unable to open HoloHangout URL: " + error.getMessage());
         }
     }
 

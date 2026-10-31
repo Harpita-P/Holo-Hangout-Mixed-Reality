@@ -8,7 +8,7 @@ import { IslandBeeSystem } from './island-bee-system.js';
 const container = document.getElementById('scene-container');
 
 if (!(container instanceof HTMLDivElement)) {
-  throw new Error('ChatIRL scene container was not found.');
+  throw new Error('HoloHangout scene container was not found.');
 }
 
 World.create(container, projectOptions)
@@ -19,5 +19,5 @@ World.create(container, projectOptions)
     world.registerSystem(IslandBeeSystem);
   })
   .catch((error: unknown) => {
-    console.error('Unable to start the ChatIRL WebXR experience.', error);
+    console.error('Unable to start the HoloHangout WebXR experience.', error);
   });

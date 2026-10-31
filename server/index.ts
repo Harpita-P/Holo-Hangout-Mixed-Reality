@@ -62,7 +62,7 @@ const participants = new ParticipantManager({
       .filter((command) => command !== '!join' && command !== '!leave')
       .join(' ');
     twitch?.sendChatMessage(
-      `@${participant.displayName} joined ChatIRL as ${participant.monsterName}! Abilities: ${abilities}`,
+      `@${participant.displayName} joined HoloHangout as ${participant.monsterName}! Abilities: ${abilities}`,
     );
   },
 });
@@ -87,7 +87,7 @@ const obs = new ObsController(
     enabled: process.env.OBS_ENABLED === 'true',
     url: process.env.OBS_WEBSOCKET_URL?.trim() || 'ws://127.0.0.1:4455',
     password: process.env.OBS_WEBSOCKET_PASSWORD ?? '',
-    sceneName: process.env.OBS_SCENE_NAME?.trim() || 'ChatIRL Live',
+    sceneName: process.env.OBS_SCENE_NAME?.trim() || 'HoloHangout Live',
     nativeCaptureSourceName:
       process.env.OBS_NATIVE_CAPTURE_SOURCE_NAME?.trim() || 'Quest Capture Feed',
     fallbackCaptureSourceName: optionalString(
@@ -155,7 +155,7 @@ const server = createServer((request, response) => {
     reportServerError(error);
     const status = error instanceof HttpError ? error.status : 500;
     const message =
-      error instanceof HttpError ? error.message : 'ChatIRL server error';
+      error instanceof HttpError ? error.message : 'HoloHangout server error';
     sendJson(response, status, { error: message });
   });
 });
@@ -172,7 +172,7 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 server.listen(port, host, async () => {
-  console.log(`ChatIRL control server: http://localhost:${port}`);
+  console.log(`HoloHangout creator dashboard: http://localhost:${port}`);
   if (debugCommands) console.log('Local debug chat endpoint enabled.');
   obs.start();
   if (captureReceiver.status().enabled && captureReceiver.status().autoStart) {
@@ -200,6 +200,12 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
     sendHtml(response, controlPage());
     return;
   }
+  if (request.method === 'GET' && url.pathname === '/creator-theme.css') {
+    const stylesheet = await readFile(resolve('public', 'creator-theme.css'), 'utf8');
+    response.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' });
+    response.end(stylesheet);
+    return;
+  }
   if (request.method === 'GET' && url.pathname === '/status') {
     const obsStatus = obs.status().connected
       ? await obs.refresh().catch(() => obs.status())
@@ -221,6 +227,8 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
       obs: obsStatus,
       capture: captureReceiver.status(),
       moments: moments.status(),
+      demo: participants.demoStatus(),
+      world: { connected: clients.size > 0, connectionCount: clients.size },
       debugCommands,
     });
     return;
@@ -263,6 +271,12 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
   }
   if (request.method === 'POST' && url.pathname === '/demo/off') {
     sendJson(response, 200, participants.setDemoMode(false));
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/admin/demo') {
+    const body = await readJson(request);
+    requireDashboardToken(body);
+    sendJson(response, 200, participants.setDemoMode(body.enabled === true));
     return;
   }
   if (request.method === 'POST' && url.pathname === '/admin/joins') {
@@ -371,46 +385,55 @@ function controlPage(): string {
     ? `Connected as ${escapeHtml(twitchStatus.broadcasterLogin ?? 'streamer')}`
     : escapeHtml(twitchStatus.error ?? 'Waiting for Twitch authorization.');
   const csrfToken = JSON.stringify(dashboardCsrfToken);
+  const localQuestUrl = `https://localhost:${numberFromEnv('CHATIRL_HTTPS_PORT', 8081)}/`;
+  const questUrlJson = JSON.stringify(localQuestUrl);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ChatIRL Streamer Control</title><style>
-body{font:16px/1.5 system-ui,sans-serif;max-width:840px;margin:40px auto;padding:0 20px;background:#071318;color:#edfafa}h1{margin-bottom:4px}h2{margin-top:0}.card{background:#10262d;border:1px solid #24515b;border-radius:16px;padding:20px;margin:18px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.check,.participant{padding:10px;border-radius:9px;background:#0a1c21}.participant{margin-top:8px}.participant strong{display:block}.participant code{font-size:12px}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:#ff7b72}.dot.ok{background:#62e6b2}.dot.warn{background:#ffc76c}button,a.button{display:inline-block;border:0;border-radius:9px;padding:11px 15px;margin:4px 6px 4px 0;background:#2ed7c4;color:#061416;font-weight:700;text-decoration:none;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.secondary{background:#dbe8e9!important}.danger{background:#ff7b72!important}.live{background:#ff4f64!important;color:#fff!important}code{color:#6ef1df}small,.muted{color:#aac4c8}.ok{color:#62e6b2}.warn{color:#ffc76c}.error{color:#ff9b93}.actions{margin-top:14px}</style></head>
-<body><h1>ChatIRL</h1><small>Local streamer control · Live broadcast</small>
-<section class="card"><h2>Twitch chat</h2><p id="twitch-status" class="${connected ? 'ok' : 'warn'}">${statusText}</p>
-${configured ? '<a class="button" href="/auth/twitch">Authorize / reconnect Twitch</a>' : '<p>Create <code>.env</code> from <code>.env.example</code>, add your Twitch app credentials, and restart this server.</p>'}</section>
-<section class="card"><h2>Native Quest capture <small>preferred</small></h2><div class="grid">
+<title>HoloHangout Creator Dashboard</title><link rel="stylesheet" href="/creator-theme.css"></head>
+<body><main class="shell">
+<nav class="topbar"><h1 class="brand">Holo<span>Hangout</span></h1><span class="local-pill"><span class="dot ok"></span>Local creator toolkit</span></nav>
+<header class="hero"><p class="eyebrow">Twitch × Mixed Reality</p><h2>A New Dimension of Shared Live Experiences</h2><p>Bring Twitch viewers into your mixed-reality world as animated characters you can meet, grab, and play with in real time.</p></header>
+<section class="steps" aria-label="HoloHangout onboarding">
+<article class="step"><span class="step-number">01</span><strong>Connect Twitch</strong><p>Authorize your channel to bring your community into HoloHangout.</p></article>
+<article class="step"><span class="step-number">02</span><strong>Enter Your World</strong><p>Open the local WebXR experience in Meta Quest Browser.</p></article>
+<article class="step"><span class="step-number">03</span><strong>Go Live on Twitch</strong><p>Broadcast mixed reality using HoloHangout Capture and OBS.</p></article>
+<article class="step"><span class="step-number">04</span><strong>Encourage Chat to Join</strong><p>Ask viewers to type <code>!join</code> to appear in your world.</p></article>
+</section>
+<div class="section-heading"><div><p class="eyebrow">Creator dashboard</p><h2>Prepare your hangout</h2></div><p>Follow the four steps above from left to right.</p></div>
+<div class="dashboard-grid">
+<section class="card"><div class="card-header"><div><h3>1. Twitch Connection</h3><p class="card-copy">One connected broadcaster per local installation.</p></div><span class="status-pill"><span id="twitch-dot" class="dot"></span><span id="twitch-chip">Checking</span></span></div><p id="twitch-status" class="${connected ? 'ok' : 'warn'}">${statusText}</p>
+${configured ? '<a class="button" href="/auth/twitch">Connect / Reconnect Twitch</a>' : '<p class="callout">Add your Twitch Client ID and Client Secret to <code>.env</code>, then restart HoloHangout. See <code>docs/TWITCH.md</code>.</p>'}</section>
+<section class="card"><div class="card-header"><div><h3>2. Your World</h3><p class="card-copy">Use this exact address in Meta Quest Browser after USB forwarding is ready.</p></div><span class="status-pill"><span id="world-dot" class="dot"></span><span id="world-status">Waiting for Quest</span></span></div>
+<div class="url-row"><code id="quest-url">${escapeHtml(localQuestUrl)}</code><button id="copy-world" class="secondary">Copy</button></div><div class="actions"><button id="open-world">Open World</button><button id="capture-usb" class="secondary">Configure USB</button></div><p class="callout">Inside Quest Browser, accept the local certificate warning once, then select <strong>Enter AR</strong>.</p></section>
+<section class="card wide"><div class="card-header"><div><h3>3. Go Live on Twitch</h3><p class="card-copy">Quest Capture → USB → local receiver → OBS → Twitch.</p></div><span id="stream-status" class="status-pill warn">Not streaming</span></div><div class="grid">
 <div class="check"><span id="receiver-dot" class="dot"></span><strong>Mac receiver</strong><div id="receiver-status" class="muted">Checking…</div></div>
-<div class="check"><span id="quest-dot" class="dot"></span><strong>Quest connection</strong><div id="quest-status" class="muted">Checking…</div></div>
+<div class="check"><span id="quest-dot" class="dot"></span><strong>Quest Capture</strong><div id="quest-status" class="muted">Checking…</div></div>
 <div class="check"><span id="video-dot" class="dot"></span><strong>Encoded video</strong><div id="video-status" class="muted">Checking…</div></div>
-<div class="check"><span id="usb-dot" class="dot"></span><strong>USB transport</strong><div id="usb-status" class="muted">Checking…</div></div></div>
-<div class="actions"><button id="capture-usb">Configure USB</button><button id="capture-restart" class="secondary">Start / Restart Receiver</button><button id="capture-stop" class="danger">Stop Receiver</button></div>
-<p><small>Quest still requires <strong>Start Capture → Entire View</strong> approval for every capture session. ChatIRL monitors encoded byte flow; it cannot prove pixel-to-pixel motion if a compositor sends valid repeated frames.</small></p></section>
-<section class="card"><h2>Broadcast</h2><div class="grid">
+<div class="check"><span id="usb-dot" class="dot"></span><strong>USB transport</strong><div id="usb-status" class="muted">Checking…</div></div>
 <div class="check"><span id="obs-dot" class="dot"></span><strong>OBS</strong><div id="obs-status" class="muted">Checking…</div></div>
-<div class="check"><span id="scene-dot" class="dot"></span><strong>Scene</strong><div id="scene-status" class="muted">Checking…</div></div>
+<div class="check"><span id="scene-dot" class="dot"></span><strong>OBS scene</strong><div id="scene-status" class="muted">Checking…</div></div>
 <div class="check"><span id="capture-dot" class="dot"></span><strong>Capture source</strong><div id="capture-status" class="muted">Checking…</div></div>
 <div class="check"><span id="mic-dot" class="dot"></span><strong>Microphone</strong><div id="mic-status" class="muted">Checking…</div></div></div>
-<p id="stream-status" class="warn">Not streaming</p><p id="broadcast-error" class="error"></p>
-<div class="actions"><button id="use-native">Use Native Feed</button><button id="use-mqdh" class="secondary">Use MQDH Fallback</button><button id="obs-reconnect" class="secondary">Reconnect OBS</button><button id="start-stream" class="live" disabled>Start Stream</button><button id="stop-stream" class="danger" disabled>Stop Stream</button></div>
-<p><small>Native Quest Capture is preferred when its receiver and OBS Media Source are healthy. MQDH remains an enabled-source fallback. OBS owns the Twitch destination; ChatIRL never stores your stream key.</small></p></section>
-<section class="card"><h2>Hangout Moments</h2><p id="moment-status" class="muted">Ready when Twitch is live.</p>
-<div class="actions"><button id="moment-auto" class="secondary">Auto-Clip Moments: OFF</button><button id="moment-clip">Clip This Moment</button></div>
-<div id="moment-list"><small>No moments clipped yet.</small></div>
-<p><small>Verified Twitch clips appear here. Automatic clips run once after a completed 60-second blaster challenge, with a 5-minute cooldown.</small></p></section>
-<section class="card"><h2>Session</h2><p><strong id="participant-count">${participants.demoStatus().realParticipantCount}/10</strong> viewer avatars active.</p>
-<button id="allow-joins">Allow joins</button><button id="pause-joins" class="secondary">Pause joins</button><button id="clear-avatars" class="danger">Clear avatars</button><div id="participant-list"><small>No monsters have joined yet.</small></div></section>
-<section class="card"><h2>Viewer commands</h2><p><strong>Big</strong><br><code>!run · !jump · !wave · !duck · !punch · !yes · !no</code></p><p><strong>Blob</strong><br><code>!dance · !jump · !bite · !walk · !yes · !no</code></p><p><strong>Flying</strong><br><code>!fly · !headbutt · !punch · !yes · !no</code></p><p><small>Every monster supports <code>!join</code>, <code>!blast</code>, and <code>!leave</code>. Commands control only the sender's monster; unsupported commands are ignored. <code>!leave</code> forcibly releases a held monster.</small></p></section>
+<p id="broadcast-error" class="error"></p><div class="actions"><button id="capture-restart" class="secondary">Start / Restart Receiver</button><button id="capture-stop" class="danger">Stop Receiver</button><button id="use-native">Use Native Feed</button><button id="use-mqdh" class="secondary">Use MQDH Fallback</button><button id="obs-reconnect" class="secondary">Reconnect OBS</button><button id="start-stream" class="live" disabled>Start Stream</button><button id="stop-stream" class="danger" disabled>Stop Stream</button></div>
+<details><summary>Quest Capture checklist</summary><ol><li>Open <strong>HoloHangout Capture</strong> in Quest.</li><li>Select <strong>Start Capture → Entire View</strong> and approve sharing.</li><li>Select <strong>Open HoloHangout</strong> and enter AR.</li><li>Confirm the native feed moves in OBS before starting the stream.</li></ol></details></section>
+<section class="card"><div class="card-header"><div><h3>4. Community</h3><p class="card-copy"><strong id="participant-count">${participants.demoStatus().realParticipantCount}/10</strong> real viewer avatars active.</p></div><span class="status-pill">Chat: <code>!join</code></span></div>
+<div class="actions"><button id="allow-joins">Allow joins</button><button id="pause-joins" class="secondary">Pause joins</button><button id="clear-avatars" class="danger">Clear avatars</button></div><div id="participant-list"><small>No viewers have joined yet.</small></div></section>
+<section class="card"><div class="card-header"><div><h3>Demo Mode</h3><p class="card-copy">Fill empty spots with clearly labeled local demo monsters.</p></div><span id="demo-status" class="status-pill">Off</span></div><button id="demo-toggle" class="secondary">Turn Demo Mode on</button><p class="callout">Demo bots never replace real viewers and are automatically cleared when Demo Mode is turned off.</p></section>
+<section class="card"><div class="card-header"><div><h3>Hangout Moments</h3><p id="moment-status" class="card-copy">Ready when Twitch is live.</p></div></div><div class="actions"><button id="moment-auto" class="secondary">Auto-Clip Moments: OFF</button><button id="moment-clip">Clip This Moment</button></div><div id="moment-list"><small>No moments clipped yet.</small></div></section>
+<section class="card"><div class="card-header"><div><h3>Viewer Commands</h3><p class="card-copy">Every monster supports <code>!join</code>, <code>!blast</code>, and <code>!leave</code>.</p></div></div><div class="command-list"><div><strong>Big</strong><p><code>!run !jump !wave !duck !punch !yes !no</code></p></div><div><strong>Blob</strong><p><code>!dance !jump !bite !walk !yes !no</code></p></div><div><strong>Flying</strong><p><code>!fly !headbutt !punch !yes !no</code></p></div></div></section>
+</div><p class="footer">HoloHangout runs entirely on this Mac. Twitch credentials remain in your private local <code>.env</code> and token directory; OBS owns the Twitch stream destination.</p>
 <script>
-const csrfToken=${csrfToken};let latest=null;const byId=(id)=>document.getElementById(id);
+const csrfToken=${csrfToken};const questUrl=${questUrlJson};let latest=null;const byId=(id)=>document.getElementById(id);
 function dot(id,state,warning=false){const element=byId(id);element.className='dot'+(state?' ok':warning?' warn':'');}
 function renderParticipants(items){renderMoments(latest.moments,latest.twitch);const root=byId('participant-list');root.replaceChildren();if(!items.length){const empty=document.createElement('small');empty.textContent='No monsters have joined yet.';root.append(empty);return;}for(const item of items){const row=document.createElement('div');row.className='participant';const title=document.createElement('strong');title.textContent=item.displayName+' · '+item.monsterName;const meta=document.createElement('small');meta.textContent=item.monsterCategory.toUpperCase()+' · '+item.behavior;const commands=document.createElement('code');commands.textContent=item.supportedCommands.join(' · ');row.append(title,meta,document.createElement('br'),commands);root.append(row);}}
 function renderMoments(value,twitch){byId('moment-status').textContent=value.message;byId('moment-status').className=value.state==='ready'?'ok':value.state==='failed'?'error':value.state==='unavailable'?'warn':'muted';byId('moment-auto').textContent='Auto-Clip Moments: '+(value.autoClipEnabled?'ON':'OFF');byId('moment-auto').className=value.autoClipEnabled?'':'secondary';byId('moment-clip').disabled=value.state==='creating'||!twitch.connected||!twitch.clipsAuthorized;const root=byId('moment-list');root.replaceChildren();if(!value.recent.length){const empty=document.createElement('small');empty.textContent='No moments clipped yet.';root.append(empty);return;}for(const clip of value.recent){const row=document.createElement('div');row.className='participant';const link=document.createElement('a');link.href=clip.url;link.target='_blank';link.rel='noopener';link.textContent=clip.title||'HoloHangout Moment';const meta=document.createElement('small');meta.textContent=new Date(clip.createdAt).toLocaleString();row.append(link,document.createElement('br'),meta);root.append(row);}}
-function render(state){latest=state;const twitch=state.twitch;byId('twitch-status').textContent=twitch.connected?'Connected as '+(twitch.broadcasterLogin||'streamer'):(twitch.error||'Twitch disconnected');byId('twitch-status').className=twitch.connected?'ok':'warn';byId('participant-count').textContent=state.participantCount+'/10';renderParticipants(state.participants);const capture=state.capture;dot('receiver-dot',capture.listening,capture.enabled);byId('receiver-status').textContent=capture.listening?'Listening on TCP '+capture.inputPort:capture.enabled?'Stopped':'Disabled in .env';dot('quest-dot',capture.receiverConnected,capture.listening);byId('quest-status').textContent=capture.receiverConnected?'Connected'+(capture.reconnectCount?' · '+capture.reconnectCount+' reconnect(s)':''):capture.listening?'Waiting for Start Capture':'Receiver not running';dot('video-dot',capture.videoActive,capture.receiverConnected);byId('video-status').textContent=capture.stalled?'STALLED · '+capture.message:capture.videoActive?capture.bitrateMbps.toFixed(2)+' Mbps · active':capture.message;dot('usb-dot',capture.adbConfigured,capture.enabled);byId('usb-status').textContent=capture.adbConfigured?'ADB reverse ready':'Select Configure USB';byId('capture-usb').disabled=!capture.enabled;byId('capture-restart').disabled=!capture.enabled;byId('capture-stop').disabled=!capture.listening;const obs=state.obs;dot('obs-dot',obs.connected,obs.enabled);byId('obs-status').textContent=obs.connected?'Connected · OBS '+(obs.obsVersion||''):obs.enabled?'Disconnected':'Disabled in .env';dot('scene-dot',obs.targetSceneAvailable);byId('scene-status').textContent=obs.targetSceneAvailable?obs.targetScene+' ready':'Need scene: '+obs.targetScene;dot('capture-dot',obs.captureHealthy,obs.captureMode==='mqdh');byId('capture-status').textContent=obs.captureMode==='native'?'Native · '+obs.captureSourceName+' · '+obs.captureHealthReason:obs.captureMode==='mqdh'?'Fallback · '+obs.captureSourceName+' · verify OBS motion':obs.captureHealthReason;dot('mic-dot',obs.microphoneSourceAvailable===true,obs.microphoneSourceName===null);byId('mic-status').textContent=obs.microphoneSourceName===null?'Not checked (optional)':obs.microphoneSourceAvailable?obs.microphoneSourceName+' · delay '+obs.microphoneSyncOffsetMs+' ms':'Need source: '+obs.microphoneSourceName;byId('stream-status').textContent=obs.streaming?'LIVE · '+obs.outputTimecode:obs.reconnecting?'OBS reconnecting…':'Not streaming';byId('stream-status').className=obs.streaming?'error':'warn';byId('broadcast-error').textContent=obs.error||(capture.enabled&&capture.error?capture.error:'');byId('use-native').disabled=!obs.connected||!capture.videoActive;byId('use-mqdh').disabled=!obs.connected||!obs.fallbackCaptureSourceName;byId('obs-reconnect').disabled=!obs.enabled;byId('start-stream').disabled=!obs.ready||obs.streaming||!twitch.connected;byId('stop-stream').disabled=!obs.connected||!obs.streaming;}
+function render(state){latest=state;const twitch=state.twitch;byId('twitch-status').textContent=twitch.connected?'Connected as '+(twitch.broadcasterLogin||'streamer'):(twitch.error||'Twitch disconnected');byId('twitch-status').className=twitch.connected?'ok':'warn';dot('twitch-dot',twitch.connected);byId('twitch-chip').textContent=twitch.connected?'Connected':'Not connected';dot('world-dot',state.world.connected);byId('world-status').textContent=state.world.connected?'Quest connected':'Waiting for Quest';byId('participant-count').textContent=state.participantCount+'/10';byId('demo-status').textContent=state.demo.enabled?'On · '+state.demo.botCount+' bots':'Off';byId('demo-toggle').textContent='Turn Demo Mode '+(state.demo.enabled?'off':'on');renderParticipants(state.participants);const capture=state.capture;dot('receiver-dot',capture.listening,capture.enabled);byId('receiver-status').textContent=capture.listening?'Listening on TCP '+capture.inputPort:capture.enabled?'Stopped':'Disabled in .env';dot('quest-dot',capture.receiverConnected,capture.listening);byId('quest-status').textContent=capture.receiverConnected?'Connected'+(capture.reconnectCount?' · '+capture.reconnectCount+' reconnect(s)':''):capture.listening?'Waiting for Start Capture':'Receiver not running';dot('video-dot',capture.videoActive,capture.receiverConnected);byId('video-status').textContent=capture.stalled?'STALLED · '+capture.message:capture.videoActive?capture.bitrateMbps.toFixed(2)+' Mbps · active':capture.message;dot('usb-dot',capture.adbConfigured,capture.enabled);byId('usb-status').textContent=capture.adbConfigured?'ADB reverse ready':'Select Configure USB';byId('capture-usb').disabled=!capture.enabled;byId('capture-restart').disabled=!capture.enabled;byId('capture-stop').disabled=!capture.listening;const obs=state.obs;dot('obs-dot',obs.connected,obs.enabled);byId('obs-status').textContent=obs.connected?'Connected · OBS '+(obs.obsVersion||''):obs.enabled?'Disconnected':'Disabled in .env';dot('scene-dot',obs.targetSceneAvailable);byId('scene-status').textContent=obs.targetSceneAvailable?obs.targetScene+' ready':'Need scene: '+obs.targetScene;dot('capture-dot',obs.captureHealthy,obs.captureMode==='mqdh');byId('capture-status').textContent=obs.captureMode==='native'?'Native · '+obs.captureSourceName+' · '+obs.captureHealthReason:obs.captureMode==='mqdh'?'Fallback · '+obs.captureSourceName+' · verify OBS motion':obs.captureHealthReason;dot('mic-dot',obs.microphoneSourceAvailable===true,obs.microphoneSourceName===null);byId('mic-status').textContent=obs.microphoneSourceName===null?'Not checked (optional)':obs.microphoneSourceAvailable?obs.microphoneSourceName+' · delay '+obs.microphoneSyncOffsetMs+' ms':'Need source: '+obs.microphoneSourceName;byId('stream-status').textContent=obs.streaming?'LIVE · '+obs.outputTimecode:obs.reconnecting?'OBS reconnecting…':'Not streaming';byId('stream-status').className='status-pill '+(obs.streaming?'error':'warn');byId('broadcast-error').textContent=obs.error||(capture.enabled&&capture.error?capture.error:'');byId('use-native').disabled=!obs.connected||!capture.videoActive;byId('use-mqdh').disabled=!obs.connected||!obs.fallbackCaptureSourceName;byId('obs-reconnect').disabled=!obs.enabled;byId('start-stream').disabled=!obs.ready||obs.streaming||!twitch.connected;byId('stop-stream').disabled=!obs.connected||!obs.streaming;}
 async function refresh(){try{const response=await fetch('/status',{cache:'no-store'});render(await response.json());}catch(error){byId('broadcast-error').textContent='Dashboard status unavailable: '+error.message;}}
 async function action(path,body={}){const response=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...body,csrfToken})});const result=await response.json();if(!response.ok)throw new Error(result.error||'Request failed');await refresh();return result;}
 byId('moment-auto').onclick=()=>action('/admin/moments/auto',{enabled:!latest.moments.autoClipEnabled}).catch((error)=>byId('moment-status').textContent=error.message);byId('moment-clip').onclick=()=>action('/admin/moments/clip').catch((error)=>byId('moment-status').textContent=error.message);
 byId('capture-usb').onclick=()=>action('/admin/capture/usb').catch((error)=>byId('broadcast-error').textContent=error.message);byId('capture-restart').onclick=()=>action('/admin/capture/restart').catch((error)=>byId('broadcast-error').textContent=error.message);byId('capture-stop').onclick=()=>action('/admin/capture/stop').catch((error)=>byId('broadcast-error').textContent=error.message);byId('use-native').onclick=()=>action('/admin/obs/capture/native').catch((error)=>byId('broadcast-error').textContent=error.message);byId('use-mqdh').onclick=()=>action('/admin/obs/capture/mqdh').catch((error)=>byId('broadcast-error').textContent=error.message);byId('obs-reconnect').onclick=()=>action('/admin/obs/reconnect').catch((error)=>byId('broadcast-error').textContent=error.message);byId('start-stream').onclick=()=>{if(confirm('Start the Twitch livestream using the current OBS output settings?'))action('/admin/stream/start').catch((error)=>byId('broadcast-error').textContent=error.message);};byId('stop-stream').onclick=()=>action('/admin/stream/stop').catch((error)=>byId('broadcast-error').textContent=error.message);byId('allow-joins').onclick=()=>action('/admin/joins',{accepting:true});byId('pause-joins').onclick=()=>action('/admin/joins',{accepting:false});byId('clear-avatars').onclick=()=>{if(confirm('Remove all viewer avatars?'))action('/admin/clear');};refresh();setInterval(refresh,1500);
-</script></body></html>`;
+byId('demo-toggle').onclick=()=>action('/admin/demo',{enabled:!latest.demo.enabled});byId('copy-world').onclick=()=>navigator.clipboard.writeText(questUrl).then(()=>{byId('copy-world').textContent='Copied';setTimeout(()=>byId('copy-world').textContent='Copy',1500)});byId('open-world').onclick=()=>window.open(questUrl,'_blank','noopener');
+</script></main></body></html>`;
 }
 
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -546,7 +569,7 @@ function shutdown(): void {
   obs.stop().catch(reportServerError);
   captureReceiver.stop().catch(reportServerError);
   participants.clear();
-  for (const client of clients) client.close(1001, 'ChatIRL server stopping');
+  for (const client of clients) client.close(1001, 'HoloHangout server stopping');
   webSockets.close();
   server.close(() => process.exit(0));
 }

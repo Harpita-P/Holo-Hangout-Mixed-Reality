@@ -73,7 +73,7 @@ public final class CaptureService extends Service {
         super.onCreate();
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "ChatIRL capture",
+                "HoloHangout capture",
                 NotificationManager.IMPORTANCE_LOW
         );
         getSystemService(NotificationManager.class).createNotificationChannel(channel);
@@ -163,7 +163,7 @@ public final class CaptureService extends Service {
 
         capturing.set(true);
         virtualDisplay = mediaProjection.createVirtualDisplay(
-                "ChatIRL compositor capture",
+                "HoloHangout compositor capture",
                 WIDTH,
                 HEIGHT,
                 320,
@@ -311,7 +311,7 @@ public final class CaptureService extends Service {
         );
         return new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.presence_video_online)
-                .setContentTitle("ChatIRL compositor capture")
+                .setContentTitle("HoloHangout compositor capture")
                 .setContentText(detail)
                 .setOngoing(true)
                 .setContentIntent(openApp)

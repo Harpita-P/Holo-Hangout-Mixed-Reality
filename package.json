@@ -1,10 +1,14 @@
 {
-  "name": "chatirl-mixedreality",
+  "name": "holohangout",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "setup": "node tools/local-setup.mjs",
+    "start:holohangout": "node tools/local-launcher.mjs",
+    "check": "node tools/local-check.mjs",
     "dev": "iwsdk dev restart --open --foreground",
+    "dev:launcher": "iwsdk dev restart --no-open --foreground",
     "dev:runtime": "vite",
     "dev:down": "iwsdk dev down",
     "dev:status": "iwsdk dev status",
@@ -17,6 +21,7 @@
     "capture:test": "node --import tsx tools/test-capture-transport.ts",
     "capture:build": "node tools/build-quest-capture.mjs",
     "capture:install": "adb install -r quest-capture/app/build/outputs/apk/debug/app-debug.apk",
+    "capture:install:release": "adb install -r release/HoloHangout-Capture.apk",
     "reference:status": "iwsdk reference status",
     "reference:warmup": "iwsdk reference warmup",
     "typecheck": "npm run typecheck:web && npm run typecheck:server",
