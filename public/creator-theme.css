@@ -44,6 +44,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
 
 .onboarding-heading { margin: 38px 2px 20px; color: var(--deep); font-size: clamp(30px, 4vw, 43px); line-height: 1.08; letter-spacing: -.045em; }
 .onboarding-heading span { text-decoration: underline; text-decoration-color: #f5c542; text-decoration-thickness: .16em; text-underline-offset: .16em; }
+.landing-cta { margin: -4px 2px 30px; }
+.landing-cta p { max-width: 760px; margin: 0 0 17px; color: var(--muted); font-size: clamp(17px, 2vw, 20px); line-height: 1.5; }
+.landing-cta .github-button { min-height: 54px; padding: 14px 24px; border-radius: 14px; background: var(--deep); box-shadow: 0 11px 26px rgb(48 19 92 / 24%); font-size: 17px; }
+.landing-cta .github-button:hover { background: var(--purple); box-shadow: 0 15px 31px rgb(48 19 92 / 28%); }
+.landing-cta small { display: block; margin-top: 12px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .stepper { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 0 0 20px; }
 .step { position: relative; display: flex; min-width: 0; min-height: 225px; overflow: hidden; flex-direction: column; justify-content: flex-end; border: 1px solid rgb(255 255 255 / 12%); border-radius: 25px; padding: 25px; color: #fff; background: var(--step-bg); box-shadow: 0 17px 38px var(--step-shadow); text-decoration: none; transition: transform .18s ease, box-shadow .18s ease; }
 .step:hover { transform: translateY(-4px); box-shadow: 0 23px 48px var(--step-shadow); }
