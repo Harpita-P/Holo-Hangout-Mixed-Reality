@@ -13,7 +13,9 @@ quest-capture/build/
 # Environment files
 .env
 .chatirl/
+.holohangout/
 .env.local
+.env.platform
 .env.production
 
 # IDE and OS files

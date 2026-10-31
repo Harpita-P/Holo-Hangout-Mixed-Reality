@@ -167,6 +167,10 @@ export class ParticipantManager {
     this.options.emit(this.snapshotMessage());
   }
 
+  remove(userId: string): boolean {
+    return this.leave(userId);
+  }
+
   clear(): void {
     this.demoEnabled = false;
     for (const participant of this.participants.values()) {

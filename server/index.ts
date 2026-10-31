@@ -62,7 +62,7 @@ const participants = new ParticipantManager({
       .filter((command) => command !== '!join' && command !== '!leave')
       .join(' ');
     twitch?.sendChatMessage(
-      `@${participant.displayName} joined ChatIRL as ${participant.monsterName}! Abilities: ${abilities}`,
+      `@${participant.displayName} joined HoloHangout as ${participant.monsterName}! Abilities: ${abilities}`,
     );
   },
 });
@@ -155,7 +155,7 @@ const server = createServer((request, response) => {
     reportServerError(error);
     const status = error instanceof HttpError ? error.status : 500;
     const message =
-      error instanceof HttpError ? error.message : 'ChatIRL server error';
+      error instanceof HttpError ? error.message : 'HoloHangout server error';
     sendJson(response, status, { error: message });
   });
 });
@@ -172,7 +172,7 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 server.listen(port, host, async () => {
-  console.log(`ChatIRL control server: http://localhost:${port}`);
+  console.log(`HoloHangout local control server: http://localhost:${port}`);
   if (debugCommands) console.log('Local debug chat endpoint enabled.');
   obs.start();
   if (captureReceiver.status().enabled && captureReceiver.status().autoStart) {
@@ -373,9 +373,9 @@ function controlPage(): string {
   const csrfToken = JSON.stringify(dashboardCsrfToken);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ChatIRL Streamer Control</title><style>
+<title>HoloHangout Streamer Control</title><style>
 body{font:16px/1.5 system-ui,sans-serif;max-width:840px;margin:40px auto;padding:0 20px;background:#071318;color:#edfafa}h1{margin-bottom:4px}h2{margin-top:0}.card{background:#10262d;border:1px solid #24515b;border-radius:16px;padding:20px;margin:18px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.check,.participant{padding:10px;border-radius:9px;background:#0a1c21}.participant{margin-top:8px}.participant strong{display:block}.participant code{font-size:12px}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:#ff7b72}.dot.ok{background:#62e6b2}.dot.warn{background:#ffc76c}button,a.button{display:inline-block;border:0;border-radius:9px;padding:11px 15px;margin:4px 6px 4px 0;background:#2ed7c4;color:#061416;font-weight:700;text-decoration:none;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.secondary{background:#dbe8e9!important}.danger{background:#ff7b72!important}.live{background:#ff4f64!important;color:#fff!important}code{color:#6ef1df}small,.muted{color:#aac4c8}.ok{color:#62e6b2}.warn{color:#ffc76c}.error{color:#ff9b93}.actions{margin-top:14px}</style></head>
-<body><h1>ChatIRL</h1><small>Local streamer control · Live broadcast</small>
+<body><h1>HoloHangout</h1><small>Local streamer control · Live broadcast</small>
 <section class="card"><h2>Twitch chat</h2><p id="twitch-status" class="${connected ? 'ok' : 'warn'}">${statusText}</p>
 ${configured ? '<a class="button" href="/auth/twitch">Authorize / reconnect Twitch</a>' : '<p>Create <code>.env</code> from <code>.env.example</code>, add your Twitch app credentials, and restart this server.</p>'}</section>
 <section class="card"><h2>Native Quest capture <small>preferred</small></h2><div class="grid">
@@ -384,7 +384,7 @@ ${configured ? '<a class="button" href="/auth/twitch">Authorize / reconnect Twit
 <div class="check"><span id="video-dot" class="dot"></span><strong>Encoded video</strong><div id="video-status" class="muted">Checking…</div></div>
 <div class="check"><span id="usb-dot" class="dot"></span><strong>USB transport</strong><div id="usb-status" class="muted">Checking…</div></div></div>
 <div class="actions"><button id="capture-usb">Configure USB</button><button id="capture-restart" class="secondary">Start / Restart Receiver</button><button id="capture-stop" class="danger">Stop Receiver</button></div>
-<p><small>Quest still requires <strong>Start Capture → Entire View</strong> approval for every capture session. ChatIRL monitors encoded byte flow; it cannot prove pixel-to-pixel motion if a compositor sends valid repeated frames.</small></p></section>
+<p><small>Quest still requires <strong>Start Capture → Entire View</strong> approval for every capture session. HoloHangout monitors encoded byte flow; it cannot prove pixel-to-pixel motion if a compositor sends valid repeated frames.</small></p></section>
 <section class="card"><h2>Broadcast</h2><div class="grid">
 <div class="check"><span id="obs-dot" class="dot"></span><strong>OBS</strong><div id="obs-status" class="muted">Checking…</div></div>
 <div class="check"><span id="scene-dot" class="dot"></span><strong>Scene</strong><div id="scene-status" class="muted">Checking…</div></div>
@@ -392,7 +392,7 @@ ${configured ? '<a class="button" href="/auth/twitch">Authorize / reconnect Twit
 <div class="check"><span id="mic-dot" class="dot"></span><strong>Microphone</strong><div id="mic-status" class="muted">Checking…</div></div></div>
 <p id="stream-status" class="warn">Not streaming</p><p id="broadcast-error" class="error"></p>
 <div class="actions"><button id="use-native">Use Native Feed</button><button id="use-mqdh" class="secondary">Use MQDH Fallback</button><button id="obs-reconnect" class="secondary">Reconnect OBS</button><button id="start-stream" class="live" disabled>Start Stream</button><button id="stop-stream" class="danger" disabled>Stop Stream</button></div>
-<p><small>Native Quest Capture is preferred when its receiver and OBS Media Source are healthy. MQDH remains an enabled-source fallback. OBS owns the Twitch destination; ChatIRL never stores your stream key.</small></p></section>
+<p><small>Native Quest Capture is preferred when its receiver and OBS Media Source are healthy. MQDH remains an enabled-source fallback. OBS owns the Twitch destination; HoloHangout never stores your stream key.</small></p></section>
 <section class="card"><h2>Hangout Moments</h2><p id="moment-status" class="muted">Ready when Twitch is live.</p>
 <div class="actions"><button id="moment-auto" class="secondary">Auto-Clip Moments: OFF</button><button id="moment-clip">Clip This Moment</button></div>
 <div id="moment-list"><small>No moments clipped yet.</small></div>
@@ -546,7 +546,7 @@ function shutdown(): void {
   obs.stop().catch(reportServerError);
   captureReceiver.stop().catch(reportServerError);
   participants.clear();
-  for (const client of clients) client.close(1001, 'ChatIRL server stopping');
+  for (const client of clients) client.close(1001, 'HoloHangout server stopping');
   webSockets.close();
   server.close(() => process.exit(0));
 }

@@ -1,4 +1,9 @@
-# ChatIRL — Phase 2 Twitch tabletop community
+# HoloHangout — mixed-reality Twitch community
+
+Production hosting and streamer onboarding are documented in
+[`docs/PHASE4_DEPLOYMENT.md`](docs/PHASE4_DEPLOYMENT.md). Internal legacy
+`ChatIRL` identifiers remain in place where renaming them would disrupt the
+verified local capture and development workflow.
 
 ChatIRL turns Twitch viewers into independently controlled miniature avatars on
 the streamer's real tabletop. This phase keeps the Quest 3S mixed-reality and
