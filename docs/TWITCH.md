@@ -29,6 +29,6 @@ Never commit `.env` or share the Client Secret. HoloHangout stores the refreshab
 1. Run `npm run start:holohangout`.
 2. Open `http://localhost:8787`.
 3. Under **1. Twitch Connection**, select **Connect / Reconnect Twitch**.
-4. Approve `user:read:chat`, `user:write:chat`, and `clips:edit`.
+4. Approve `user:read:chat` and `user:write:chat`.
 
-The first two permissions receive chat and send join guidance. `clips:edit` powers Hangout Moments. Tokens are validated and refreshed automatically. Password changes, revoked connections, expired refresh tokens, or regenerated application secrets can require reauthorization.
+These permissions receive chat and send join guidance. Tokens are validated and refreshed automatically. Password changes, revoked connections, expired refresh tokens, or regenerated application secrets can require reauthorization.

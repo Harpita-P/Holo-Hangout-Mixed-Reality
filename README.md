@@ -16,7 +16,6 @@ HoloHangout brings Twitch viewers into a streamer's mixed-reality world as anima
 - Meet viewers as animated monsters with names and live speech bubbles.
 - Physically grab characters, give community shoutouts, and play the blaster challenge.
 - Broadcast actual Quest passthrough, hands, avatars, and interactions through OBS.
-- Create Twitch clips with Hangout Moments.
 - Open Community Sandbox and physically approve viewer ideas that become grabbable voxel sculptures.
 
 ### For viewers

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { TwitchEventSub } from './twitch-eventsub.js';
 
-test('Twitch authorization requests chat and clip permissions', () => {
+test('Twitch authorization requests only chat permissions', () => {
   const twitch = new TwitchEventSub(
     {
       clientId: 'client-id',
@@ -16,6 +16,5 @@ test('Twitch authorization requests chat and clip permissions', () => {
   assert.deepEqual(new Set(url.searchParams.get('scope')?.split(' ')), new Set([
     'user:read:chat',
     'user:write:chat',
-    'clips:edit',
   ]));
 });

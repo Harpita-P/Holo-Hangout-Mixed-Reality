@@ -67,7 +67,6 @@ export type ServerMessage =
   | { type: 'avatar.leave'; userId: string; deadlineMs: number }
   | { type: 'avatar.removed'; userId: string }
   | { type: 'community.leaderboard'; entries: CommunityLeaderboardEntry[] }
-  | { type: 'hangout.moment'; clipId: string }
   | { type: 'sandbox.snapshot'; sandbox: CommunitySandboxSnapshot }
   | { type: 'sandbox.request'; request: SandboxRequestSnapshot }
   | { type: 'sandbox.request.removed'; requestId: string; userId: string }
@@ -83,8 +82,7 @@ export type ServerMessage =
 export type ClientMessage =
   | { type: 'client.ready' }
   | { type: 'avatar.held'; userId: string; held: boolean }
-  | { type: 'sandbox.approve'; requestId: string; userId: string }
-  | { type: 'challenge.completed'; challengeId: string };
+  | { type: 'sandbox.approve'; requestId: string; userId: string };
 
 export function isClientMessage(value: unknown): value is ClientMessage {
   if (typeof value !== 'object' || value === null || !('type' in value)) {
@@ -93,9 +91,6 @@ export function isClientMessage(value: unknown): value is ClientMessage {
   const candidate = value as Record<string, unknown>;
   if (candidate.type === 'client.ready') {
     return true;
-  }
-  if (candidate.type === 'challenge.completed') {
-    return typeof candidate.challengeId === 'string' && candidate.challengeId.length <= 100;
   }
   if (candidate.type === 'sandbox.approve') {
     return typeof candidate.requestId === 'string' && candidate.requestId.length <= 100 &&

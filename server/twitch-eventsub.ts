@@ -42,7 +42,6 @@ interface EventSubEnvelope {
 export interface TwitchStatus {
   connected: boolean;
   broadcasterLogin: string | null;
-  clipsAuthorized: boolean;
   error: string | null;
 }
 
@@ -73,7 +72,7 @@ export class TwitchEventSub {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', this.config.clientId);
     url.searchParams.set('redirect_uri', this.config.redirectUri);
-    url.searchParams.set('scope', 'user:read:chat user:write:chat clips:edit');
+    url.searchParams.set('scope', 'user:read:chat user:write:chat');
     url.searchParams.set('state', state);
     return url.toString();
   }
@@ -142,59 +141,7 @@ export class TwitchEventSub {
     return {
       connected: this.socket?.readyState === WebSocket.OPEN,
       broadcasterLogin: this.token?.login ?? null,
-      clipsAuthorized: this.clipsAuthorized(),
       error: this.lastError,
-    };
-  }
-
-  clipsAuthorized(): boolean {
-    return this.scopes.has('clips:edit');
-  }
-
-  async isBroadcasterLive(): Promise<boolean> {
-    const token = await this.currentToken();
-    const url = new URL('https://api.twitch.tv/helix/streams');
-    url.searchParams.set('user_id', token.userId);
-    const response = await fetch(url, { headers: this.helixHeaders(token) });
-    if (!response.ok) throw new Error(`Twitch live-status check failed (${response.status}).`);
-    const result = (await response.json()) as { data?: unknown[] };
-    return (result.data?.length ?? 0) > 0;
-  }
-
-  async createClip(title: string, duration: number): Promise<{ id: string }> {
-    if (!this.clipsAuthorized()) throw new Error('Reconnect Twitch to grant clips:edit.');
-    const token = await this.currentToken();
-    const url = new URL('https://api.twitch.tv/helix/clips');
-    url.searchParams.set('broadcaster_id', token.userId);
-    url.searchParams.set('title', title.slice(0, 100));
-    url.searchParams.set('duration', String(Math.max(5, Math.min(60, duration))));
-    const response = await fetch(url, { method: 'POST', headers: this.helixHeaders(token) });
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`Twitch clip creation failed (${response.status}): ${detail}`);
-    }
-    const result = (await response.json()) as { data?: Array<{ id?: string }> };
-    const id = result.data?.[0]?.id;
-    if (!id) throw new Error('Twitch accepted the clip request without returning a clip ID.');
-    return { id };
-  }
-
-  async getClip(id: string): Promise<{ id: string; url: string; title: string; createdAt: string } | null> {
-    const token = await this.currentToken();
-    const url = new URL('https://api.twitch.tv/helix/clips');
-    url.searchParams.set('id', id);
-    const response = await fetch(url, { headers: this.helixHeaders(token) });
-    if (!response.ok) throw new Error(`Twitch clip verification failed (${response.status}).`);
-    const result = (await response.json()) as {
-      data?: Array<{ id?: string; url?: string; title?: string; created_at?: string }>;
-    };
-    const clip = result.data?.[0];
-    if (!clip?.id || !clip.url) return null;
-    return {
-      id: clip.id,
-      url: clip.url,
-      title: clip.title ?? 'HoloHangout Moment',
-      createdAt: clip.created_at ?? new Date().toISOString(),
     };
   }
 
@@ -475,19 +422,6 @@ export class TwitchEventSub {
     for (const scope of scopes) this.scopes.add(scope);
   }
 
-  private async currentToken(): Promise<TwitchToken> {
-    if (this.token == null) throw new Error('Connect Twitch before creating a Hangout Moment.');
-    if (this.token.expiresAt <= Date.now() + 30_000) await this.refresh();
-    if (this.token == null) throw new Error('Twitch authorization is unavailable.');
-    return this.token;
-  }
-
-  private helixHeaders(token: TwitchToken): Record<string, string> {
-    return {
-      Authorization: `Bearer ${token.accessToken}`,
-      'Client-Id': this.config.clientId,
-    };
-  }
 
   private clearTimers(): void {
     for (const timer of [

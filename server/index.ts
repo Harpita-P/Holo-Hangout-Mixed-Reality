@@ -6,7 +6,6 @@ import { dirname, resolve } from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { isClientMessage, type ServerMessage } from '../shared/protocol.js';
 import { ParticipantManager, type ChatMessage } from './participant-manager.js';
-import { HangoutMomentsService } from './hangout-moments.js';
 import { NativeCaptureReceiver } from './native-capture-receiver.js';
 import { ObsController } from './obs-controller.js';
 import { CommunitySandbox, parseBuildCommand } from './community-sandbox.js';
@@ -25,7 +24,6 @@ const clientId = process.env.TWITCH_CLIENT_ID?.trim() ?? '';
 const clientSecret = process.env.TWITCH_CLIENT_SECRET?.trim() ?? '';
 const debugCommands = process.env.CHATIRL_ALLOW_DEBUG_COMMANDS === 'true';
 const tokenPath = resolve('.chatirl', 'twitch-token.json');
-const momentsPath = resolve('.chatirl', 'hangout-moments.json');
 const oauthStates = new Map<string, number>();
 const clients = new Set<WebSocket>();
 const dashboardCsrfToken = randomBytes(24).toString('base64url');
@@ -33,7 +31,6 @@ const dashboardCsrfToken = randomBytes(24).toString('base64url');
 let twitchStatus: TwitchStatus = {
   connected: false,
   broadcasterLogin: null,
-  clipsAuthorized: false,
   error:
     clientId && clientSecret
       ? null
@@ -138,13 +135,6 @@ twitch =
         (token) => saveToken(token).catch(reportServerError),
       )
     : null;
-const moments = new HangoutMomentsService(
-  twitch,
-  momentsPath,
-  () => undefined,
-  (clip) => broadcast({ type: 'hangout.moment', clipId: clip.id }),
-);
-
 const webSockets = new WebSocketServer({ noServer: true, maxPayload: 65_536 });
 webSockets.on('connection', (socket) => {
   clients.add(socket);
@@ -157,9 +147,6 @@ webSockets.on('connection', (socket) => {
         socket.send(JSON.stringify(participants.leaderboardMessage()));
         socket.send(JSON.stringify(statusMessage()));
         socket.send(JSON.stringify(sandbox.snapshotMessage()));
-      }
-      if (message.type === 'challenge.completed') {
-        void moments.completeChallenge(message.challengeId).catch(reportServerError);
       }
       if (message.type === 'avatar.held') sandbox.setHeld(message.userId, message.held);
       if (message.type === 'sandbox.approve') sandbox.approve(message.requestId, message.userId);
@@ -198,7 +185,6 @@ server.listen(port, host, async () => {
   if (captureReceiver.status().enabled && captureReceiver.status().autoStart) {
     captureReceiver.start().catch(reportServerError);
   }
-  await moments.load();
   if (twitch != null) {
     const savedToken = await loadToken();
     if (savedToken != null) {
@@ -206,7 +192,6 @@ server.listen(port, host, async () => {
         twitchStatus = {
           connected: false,
           broadcasterLogin: savedToken.login,
-          clipsAuthorized: false,
           error: error instanceof Error ? error.message : String(error),
         };
       });
@@ -252,7 +237,6 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
       ),
       obs: obsStatus,
       capture: captureReceiver.status(),
-      moments: moments.status(),
       demo: participants.demoStatus(),
       sandbox: sandbox.dashboardStatus(),
       world: { connected: clients.size > 0, connectionCount: clients.size },
@@ -398,20 +382,6 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
     await sendObsOperation(response, () => obs.stopStream());
     return;
   }
-  if (request.method === 'POST' && url.pathname === '/admin/moments/auto') {
-    const body = await readJson(request);
-    requireDashboardToken(body);
-    sendJson(response, 200, {
-      ok: true,
-      moments: await moments.setAutoClipEnabled(body.enabled === true),
-    });
-    return;
-  }
-  if (request.method === 'POST' && url.pathname === '/admin/moments/clip') {
-    requireDashboardToken(await readJson(request));
-    sendJson(response, 200, { ok: true, moments: await moments.createManualMoment() });
-    return;
-  }
   if (request.method === 'POST' && url.pathname === '/debug/chat' && debugCommands) {
     const body = await readJson(request);
     if (
@@ -447,7 +417,7 @@ function controlPage(): string {
 <title>HoloHangout Creator Dashboard</title><link rel="stylesheet" href="/creator-theme.css"></head>
 <body><main class="shell">
 <nav class="topbar"><div class="brand-lockup"><h1 class="visually-hidden">HoloHangout</h1><img class="brand-logo" src="/holohangout-logo.png" alt="HoloHangout"><p class="brand-tagline">Bring your Twitch community into mixed reality.</p></div></nav>
-<h2 class="onboarding-heading">Start a new <span>Mixed Reality Experience</span></h2>
+<h2 class="onboarding-heading">Launch a Shared Mixed Reality Experience for <span>Chat</span></h2>
 <nav class="stepper" aria-label="Getting started">
 <a id="step-twitch" class="step" href="#connect-twitch"><span class="step-number" aria-hidden="true"></span><span class="step-content"><span class="step-label">STEP 1</span><strong>Connect Twitch</strong><small id="step-twitch-status">Checking…</small></span></a>
 <a id="step-world" class="step" href="#enter-world"><span class="step-number" aria-hidden="true"></span><span class="step-content"><span class="step-label">STEP 2</span><strong>Enter Your World</strong><small id="step-world-status">Checking…</small></span></a>
@@ -476,15 +446,13 @@ ${configured ? `<a class="button twitch-action" href="/auth/twitch">${connected 
 <section id="community" class="card community-panel"><div class="card-header"><h3>Your Community</h3><span class="status-pill join-command"><code>!join</code></span></div><div class="viewer-metric"><strong id="participant-count">0 / 10</strong><span>Viewers in Your World</span></div><div class="actions"><button id="allow-joins">Allow Joins</button><button id="pause-joins" class="secondary">Pause Joins</button></div><div id="participant-list" class="participant-list"></div><details><summary>Community Options</summary><button id="clear-avatars" class="danger">Clear Avatars</button></details></section>
 <section id="sandbox-card" class="card experience-card sandbox-card"><div class="card-header"><h3>Community Sandbox</h3><span id="sandbox-status" class="status-pill">Inactive</span></div><div class="sandbox-summary"><span><small>Pending</small><strong id="sandbox-pending">0</strong></span><span><small>Creating</small><strong id="sandbox-generating">0</strong></span><span><small>Completed</small><strong id="sandbox-creations">0</strong></span></div><p id="sandbox-config" class="callout" hidden></p><div class="actions"><button id="sandbox-start">Start Sandbox</button><button id="sandbox-stop" class="secondary">Stop Sandbox</button></div><details><summary>Sandbox Settings</summary><p class="muted">Generation allowance: <span id="sandbox-allowance">20 / 20 remaining</span></p><p class="muted">Turn Bot Friendly Mode on, start Sandbox, then add a no-cost test request.</p><div class="url-row"><input id="sandbox-mock-prompt" maxlength="100" value="colorful dragon" aria-label="Mock build prompt"><button id="sandbox-mock" class="secondary">Add Test Request</button></div><div class="actions"><button id="sandbox-clear" class="danger">Clear Creations</button></div></details></section>
 <section id="demo-card" class="card compact-card experience-card"><div class="card-header"><h3>Include Bots</h3><span id="demo-status" class="status-pill">Off</span></div><button id="demo-toggle" class="toggle-button secondary" aria-pressed="false">Turn Bot Friendly Mode On</button></section>
-<section id="moments-card" class="card compact-card experience-card"><div class="card-header"><h3>Hangout Moments</h3></div><p id="moment-status" class="helper">Ready when Twitch is live.</p><div class="actions"><button id="moment-auto" class="secondary">Automatic Clips: Off</button><button id="moment-clip">Clip This Moment</button></div><div id="moment-list" class="clip-list"></div></section>
 </div></section>
 <section class="dashboard-section help-section" aria-labelledby="help-heading"><h2 id="help-heading" class="visually-hidden">Help and guides</h2><details class="card wide guides-panel"><summary class="guides-heading"><span class="panel-icon" aria-hidden="true">?</span><span><strong>Help &amp; Guides</strong><small>Viewer commands and setup help</small></span></summary><div class="guide-grid"><details><summary>Viewer Commands</summary><div class="featured-command"><code>!join</code><span>Join the world</span></div><div class="command-list"><div><strong>Everyone</strong><p><code>!join !leave !blast !support !like !fire</code></p></div><div><strong>Big monsters</strong><p><code>!run !jump !wave !duck !punch !yes !no</code></p></div><div><strong>Blob monsters</strong><p><code>!dance !jump !bite !walk !yes !no</code></p></div><div><strong>Flying monsters</strong><p><code>!fly !headbutt !punch !yes !no</code></p></div><div><strong>Community Sandbox</strong><p><code>!build &lt;idea&gt;</code></p></div></div></details><details><summary>Quest Setup Guide</summary><p>Connect and unlock your headset by USB, select <strong>Set Up Quest</strong>, then open the Quest link in Meta Quest Browser.</p></details><details><summary>OBS Setup Guide</summary><p>Open OBS, enable its WebSocket server, select <strong>HoloHangout Live</strong>, and confirm the Quest feed is moving.</p></details><details><summary>Troubleshooting</summary><ol><li>Confirm Quest Capture has permission to share Entire View.</li><li>Confirm OBS is open on the HoloHangout Live scene.</li><li>Open Advanced Streaming Settings to inspect the failing connection and reconnect it.</li></ol></details></div></details>
 </section><p class="footer">HoloHangout runs locally on this computer. Your Twitch credentials and stream settings stay under your control.</p>
 <script>
 const csrfToken=${csrfToken};const questUrl=${questUrlJson};let latest=null;const byId=(id)=>document.getElementById(id);
 function dot(id,state,warning=false){const element=byId(id);element.className='dot'+(state?' ok':warning?' warn':'');}
-function renderParticipants(items){renderMoments(latest.moments,latest.twitch);const root=byId('participant-list');root.replaceChildren();for(const item of items){const row=document.createElement('div');row.className='participant';const avatar=document.createElement('span');avatar.className='participant-avatar';avatar.textContent=item.displayName.slice(0,1).toUpperCase();const text=document.createElement('span');const title=document.createElement('strong');title.textContent=item.displayName;const meta=document.createElement('small');meta.textContent=item.monsterName+' · '+item.behavior; text.append(title,meta);row.append(avatar,text);root.append(row);}}
-function renderMoments(value,twitch){const status=byId('moment-status');status.textContent=!twitch.connected?'Connect Twitch to use Hangout Moments.':!twitch.clipsAuthorized?'Reconnect Twitch once to enable clips.':value.state==='creating'?'Saving your moment…':value.state==='failed'?'That clip could not be saved. Try again when your stream is live.':value.state==='unavailable'?'Go live on Twitch to start clipping moments.':'Ready to capture a moment.';status.className=value.state==='failed'?'helper error':value.state==='ready'?'helper ok':'helper';byId('moment-auto').textContent='Automatic Clips: '+(value.autoClipEnabled?'On':'Off');byId('moment-auto').className=value.autoClipEnabled?'':'secondary';byId('moment-auto').setAttribute('aria-pressed',String(value.autoClipEnabled));byId('moment-clip').disabled=value.state==='creating'||!twitch.connected||!twitch.clipsAuthorized;const root=byId('moment-list');root.replaceChildren();for(const clip of value.recent){const row=document.createElement('div');row.className='participant';const link=document.createElement('a');link.href=clip.url;link.target='_blank';link.rel='noopener';link.textContent=clip.title||'HoloHangout Moment';const meta=document.createElement('small');meta.textContent=new Date(clip.createdAt).toLocaleString();row.append(link,meta);root.append(row);}}
+function renderParticipants(items){const root=byId('participant-list');root.replaceChildren();for(const item of items){const row=document.createElement('div');row.className='participant';const avatar=document.createElement('span');avatar.className='participant-avatar';avatar.textContent=item.displayName.slice(0,1).toUpperCase();const text=document.createElement('span');const title=document.createElement('strong');title.textContent=item.displayName;const meta=document.createElement('small');meta.textContent=item.monsterName+' · '+item.behavior; text.append(title,meta);row.append(avatar,text);root.append(row);}}
 function renderSandbox(value,demo){byId('sandbox-status').textContent=value.active?'Active':'Inactive';byId('sandbox-status').className='status-pill '+(value.active?'ok':'');byId('sandbox-pending').textContent=String(value.pendingCount);byId('sandbox-generating').textContent=String(value.generatingCount);byId('sandbox-creations').textContent=String(value.creationCount);byId('sandbox-allowance').textContent=value.remainingAllowance+' of '+value.sessionLimit+' remaining';const config=byId('sandbox-config');const needsKey=value.generator!=='mock'&&!value.apiKeyConfigured;config.hidden=!needsKey&&!value.lastError;config.textContent=value.lastError||'Add your Gemini API key in local Settings before approving real creations.';config.className='callout warning';byId('sandbox-start').disabled=value.active;byId('sandbox-stop').disabled=!value.active;byId('sandbox-clear').disabled=value.creationCount===0;byId('sandbox-mock').disabled=!value.active||!demo.enabled;}
 function setStep(id,state,label){const element=byId(id);element.className='step '+state;const status=element.querySelector('small');if(status)status.textContent=label;}
 function renderCreatorExperience(state){const twitch=state.twitch;const capture=state.capture;const obs=state.obs;const viewerCount=state.participantCount;const captureReady=capture.videoActive&&!capture.stalled;const broadcastReady=obs.ready&&twitch.connected;const streamProblem=Boolean(obs.error||capture.error);
@@ -492,13 +460,12 @@ setStep('step-twitch',twitch.connected?'complete':'active waiting',twitch.connec
 byId('overview-twitch').textContent=twitch.connected?'Connected':'Not connected';byId('overview-quest').textContent=state.world.connected?'Connected':'Not connected';byId('overview-broadcast').textContent=obs.streaming?'Live':broadcastReady?'Ready':'Needs setup';byId('overview-viewers').textContent=viewerCount===0?'None yet':viewerCount+' of 10';
 byId('twitch-status').textContent=twitch.connected?'@'+(twitch.broadcasterLogin||'streamer'):'Not connected';byId('twitch-helper').textContent=twitch.connected?'Connected':'Connect Twitch to continue.';byId('twitch-account').classList.toggle('connected',twitch.connected);byId('world-status').textContent=state.world.connected?'Headset connected':'Waiting for your headset';byId('participant-count').textContent=viewerCount+' / 10';byId('allow-joins').disabled=state.acceptingJoins;byId('pause-joins').disabled=!state.acceptingJoins;
 byId('demo-toggle').textContent=state.demo.enabled?'Turn Bot Friendly Mode Off':'Turn Bot Friendly Mode On';byId('demo-toggle').setAttribute('aria-pressed',String(state.demo.enabled));
-byId('sandbox-card').classList.toggle('active',state.sandbox.active);byId('demo-card').classList.toggle('active',state.demo.enabled);byId('moments-card').classList.toggle('active',state.moments.autoClipEnabled);byId('go-live').classList.toggle('is-live',obs.streaming);
+byId('sandbox-card').classList.toggle('active',state.sandbox.active);byId('demo-card').classList.toggle('active',state.demo.enabled);byId('go-live').classList.toggle('is-live',obs.streaming);
 byId('capture-main-status').textContent=captureReady?'Capturing':capture.receiverConnected?'Waiting for video':'Not connected';byId('obs-main-status').textContent=obs.connected?obs.ready?'Ready':'Needs attention':'Not connected';byId('stream-main-status').textContent=obs.streaming?'Live':'Offline';dot('stream-dot',obs.streaming,broadcastReady);byId('stream-status').textContent=obs.streaming?'You’re Live!':broadcastReady?'Ready to Stream':'Offline';byId('stream-status').className='status-pill '+(obs.streaming?'live-status':broadcastReady?'ok':'warn');
 let guidance='Everything looks ready. Start your stream when you’re ready.';if(obs.streaming)guidance='You’re live! Viewers can now watch and interact with your mixed-reality world.';else if(!twitch.connected)guidance='Connect Twitch before starting your stream.';else if(!capture.enabled)guidance='Quest Capture is turned off. Enable it in your local settings and restart HoloHangout.';else if(!capture.receiverConnected)guidance='Open HoloHangout Capture on Quest and approve screen sharing.';else if(!captureReady)guidance=capture.stalled?'Quest Capture stopped updating. Restart capture from Advanced Details.':'Waiting for video from your Quest.';else if(!obs.connected)guidance='OBS isn’t connected. Open OBS and make sure its WebSocket server is enabled.';else if(!obs.targetSceneAvailable)guidance='Open the HoloHangout Live scene in OBS, then reconnect.';else if(!obs.captureHealthy)guidance='OBS is connected, but the Quest feed is not active yet.';byId('stream-guidance').textContent=guidance;byId('stream-guidance').className='guidance '+(obs.streaming||broadcastReady?'success':'');if(capture.adbConfigured){byId('world-usb-feedback').textContent='Your Quest connection is ready. Open the Quest link in your headset.';byId('world-usb-feedback').className='helper ok';}}
 function render(state){latest=state;const twitch=state.twitch;byId('twitch-status').textContent=twitch.connected?'Connected as '+(twitch.broadcasterLogin||'streamer'):(twitch.error||'Twitch disconnected');byId('twitch-status').className=twitch.connected?'ok':'warn';dot('twitch-dot',twitch.connected);byId('twitch-chip').textContent=twitch.connected?'Connected':'Not connected';dot('world-dot',state.world.connected);byId('world-status').textContent=state.world.connected?'Quest Browser connected':'Waiting for Quest Browser';byId('participant-count').textContent=state.participantCount+'/10';byId('demo-status').textContent=state.demo.enabled?'On · '+state.demo.botCount+' bots':'Off';byId('demo-toggle').textContent='Turn Bot Friendly Mode '+(state.demo.enabled?'Off':'On');renderParticipants(state.participants);const capture=state.capture;dot('receiver-dot',capture.listening,capture.enabled);byId('receiver-status').textContent=capture.listening?'Listening on TCP '+capture.inputPort:capture.enabled?'Stopped':'Disabled in .env';dot('quest-dot',capture.receiverConnected,capture.listening);byId('quest-status').textContent=capture.receiverConnected?'Connected'+(capture.reconnectCount?' · '+capture.reconnectCount+' reconnect(s)':''):capture.listening?'Waiting for Start Capture':'Receiver not running';dot('video-dot',capture.videoActive,capture.receiverConnected);byId('video-status').textContent=capture.stalled?'STALLED · '+capture.message:capture.videoActive?capture.bitrateMbps.toFixed(2)+' Mbps · active':capture.message;dot('usb-dot',capture.adbConfigured,capture.enabled);byId('usb-status').textContent=capture.adbConfigured?'ADB reverse ready':'Select Configure USB';if(capture.adbConfigured){byId('world-usb-feedback').textContent='USB forwarding is ready. Open the world in Quest Browser.';byId('world-usb-feedback').className='ok';}byId('capture-restart').disabled=!capture.enabled;byId('capture-stop').disabled=!capture.listening;const obs=state.obs;dot('obs-dot',obs.connected,obs.enabled);byId('obs-status').textContent=obs.connected?'Connected · OBS '+(obs.obsVersion||''):obs.enabled?'Disconnected':'Disabled in .env';dot('scene-dot',obs.targetSceneAvailable);byId('scene-status').textContent=obs.targetSceneAvailable?obs.targetScene+' ready':'Need scene: '+obs.targetScene;dot('capture-dot',obs.captureHealthy,obs.captureMode==='mqdh');byId('capture-status').textContent=obs.captureMode==='native'?'Native · '+obs.captureSourceName+' · '+obs.captureHealthReason:obs.captureMode==='mqdh'?'Fallback · '+obs.captureSourceName+' · verify OBS motion':obs.captureHealthReason;dot('mic-dot',obs.microphoneSourceAvailable===true,obs.microphoneSourceName===null);byId('mic-status').textContent=obs.microphoneSourceName===null?'Not checked (optional)':obs.microphoneSourceAvailable?obs.microphoneSourceName+' · delay '+obs.microphoneSyncOffsetMs+' ms':'Need source: '+obs.microphoneSourceName;byId('stream-status').textContent=obs.streaming?'LIVE · '+obs.outputTimecode:obs.reconnecting?'OBS reconnecting…':'Not streaming';byId('stream-status').className='status-pill '+(obs.streaming?'error':'warn');byId('broadcast-error').textContent=obs.error||(capture.enabled&&capture.error?capture.error:'');byId('use-native').disabled=!obs.connected||!capture.videoActive;byId('use-mqdh').disabled=!obs.connected||!obs.fallbackCaptureSourceName;byId('obs-reconnect').disabled=!obs.enabled;byId('start-stream').disabled=!obs.ready||obs.streaming||!twitch.connected;byId('stop-stream').disabled=!obs.connected||!obs.streaming;}
 async function refresh(){try{const response=await fetch('/status',{cache:'no-store'});const state=await response.json();renderSandbox(state.sandbox,state.demo);render(state);renderCreatorExperience(state);}catch(error){byId('stream-guidance').textContent='The dashboard cannot reach HoloHangout right now. Keep this window open and restart HoloHangout if needed.';byId('broadcast-error').textContent=error.message;}}
 async function action(path,body={}){const response=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...body,csrfToken})});const result=await response.json();if(!response.ok)throw new Error(result.error||'Request failed');await refresh();return result;}
-byId('moment-auto').onclick=()=>action('/admin/moments/auto',{enabled:!latest.moments.autoClipEnabled}).catch((error)=>byId('moment-status').textContent=error.message);byId('moment-clip').onclick=()=>action('/admin/moments/clip').catch((error)=>byId('moment-status').textContent=error.message);
 byId('capture-usb').onclick=async()=>{const button=byId('capture-usb');const feedback=byId('world-usb-feedback');button.disabled=true;button.textContent='Setting Up…';feedback.textContent='Checking your headset connection…';feedback.className='helper';try{await action('/admin/capture/usb');feedback.textContent='Your Quest is ready. Open the Quest link in Meta Quest Browser.';feedback.className='helper ok';}catch(error){feedback.textContent='Quest setup needs attention. Make sure the headset is connected, unlocked, and USB debugging is allowed.';feedback.className='helper error';byId('broadcast-error').textContent=error.message;}finally{button.disabled=false;button.textContent='Set Up Quest';}};byId('capture-restart').onclick=()=>action('/admin/capture/restart').catch((error)=>byId('broadcast-error').textContent=error.message);byId('capture-stop').onclick=()=>action('/admin/capture/stop').catch((error)=>byId('broadcast-error').textContent=error.message);byId('use-native').onclick=()=>action('/admin/obs/capture/native').catch((error)=>byId('broadcast-error').textContent=error.message);byId('use-mqdh').onclick=()=>action('/admin/obs/capture/mqdh').catch((error)=>byId('broadcast-error').textContent=error.message);byId('obs-reconnect').onclick=()=>action('/admin/obs/reconnect').catch((error)=>byId('broadcast-error').textContent=error.message);byId('start-stream').onclick=()=>{if(confirm('Start your Twitch livestream now?'))action('/admin/stream/start').catch((error)=>{byId('stream-guidance').textContent='Your stream could not start. Check Advanced Details for the technical error.';byId('broadcast-error').textContent=error.message;});};byId('stop-stream').onclick=()=>action('/admin/stream/stop').catch((error)=>byId('broadcast-error').textContent=error.message);byId('allow-joins').onclick=()=>action('/admin/joins',{accepting:true}).catch((error)=>byId('broadcast-error').textContent=error.message);byId('pause-joins').onclick=()=>action('/admin/joins',{accepting:false}).catch((error)=>byId('broadcast-error').textContent=error.message);byId('clear-avatars').onclick=()=>{if(confirm('Remove all viewer avatars from your world?'))action('/admin/clear').catch((error)=>byId('broadcast-error').textContent=error.message);};refresh();setInterval(refresh,1500);
 byId('demo-toggle').onclick=()=>action('/admin/demo',{enabled:!latest.demo.enabled});byId('copy-world').onclick=()=>navigator.clipboard.writeText(questUrl).then(()=>{byId('copy-world').textContent='Copied!';setTimeout(()=>byId('copy-world').textContent='Copy Quest Link',1500)});byId('open-world').onclick=()=>window.open(questUrl,'_blank','noopener');
 byId('sandbox-start').onclick=()=>action('/admin/sandbox/start');byId('sandbox-stop').onclick=()=>action('/admin/sandbox/stop');byId('sandbox-clear').onclick=()=>{if(confirm('Remove all Community Sandbox creations from the world?'))action('/admin/sandbox/clear');};byId('sandbox-mock').onclick=()=>action('/admin/sandbox/mock-request',{prompt:byId('sandbox-mock-prompt').value}).catch((error)=>byId('sandbox-config').textContent=error.message);

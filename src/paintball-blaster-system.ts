@@ -108,7 +108,6 @@ export class PaintballBlasterSystem extends createSystem({
   private roundStartedAt = 0;
   private roundHits = 0;
   private chatHits = 0;
-  private roundId: string | null = null;
   private winnerMessage = '';
   private winnerUntil = 0;
   private renderedSecond = -1;
@@ -414,7 +413,6 @@ export class PaintballBlasterSystem extends createSystem({
   private startRound(): void {
     this.roundActive = true;
     this.roundStartedAt = this.currentTime;
-    this.roundId = createChallengeId();
     this.roundHits = 0;
     this.chatHits = 0;
     this.winnerMessage = '';
@@ -427,7 +425,6 @@ export class PaintballBlasterSystem extends createSystem({
   private stopRound(): void {
     this.roundActive = false;
     this.roundStartedAt = 0;
-    this.roundId = null;
     this.roundHits = 0;
     this.chatHits = 0;
     this.winnerMessage = '';
@@ -444,13 +441,7 @@ export class PaintballBlasterSystem extends createSystem({
         winner === 'streamer' ? 'STREAMER WINS!' : winner === 'chat' ? 'CHAT WINS!' : 'TIE GAME!'
       }  ${this.roundHits}–${this.chatHits}`;
       this.winnerUntil = time + 3.8;
-      if (this.roundId != null) {
-        window.dispatchEvent(new CustomEvent('holohangout:challenge-completed', {
-          detail: { challengeId: this.roundId },
-        }));
-      }
       this.roundStartedAt = time;
-      this.roundId = createChallengeId();
       this.roundHits = 0;
       this.chatHits = 0;
       remaining = ROUND_SECONDS;
@@ -613,11 +604,6 @@ export class PaintballBlasterSystem extends createSystem({
     }
     return closest == null ? null : { entity: closest, distance: closestDistance };
   }
-}
-
-function createChallengeId(): string {
-  return globalThis.crypto?.randomUUID?.() ??
-    `challenge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function createEnergyProjectile(

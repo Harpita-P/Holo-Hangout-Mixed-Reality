@@ -34,5 +34,4 @@ Release helpers are `npm run setup`, `npm run check`, and `npm run start:holohan
 
 - `.env` — local credentials and OBS settings.
 - `.chatirl/twitch-token.json` — Twitch token, stored with user-only permissions.
-- `.chatirl/hangout-moments.json` — local clip history/settings.
 - `quest-capture/app/build/` — generated Android output.

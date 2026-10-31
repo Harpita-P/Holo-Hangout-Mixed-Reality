@@ -32,11 +32,32 @@
       }
       #connection-status[data-state="ready"] { border-color: #2ed7c4; }
       #connection-status[data-state="waiting"] { border-color: #ffc76c; }
+      #landing-brand {
+        position: fixed;
+        top: clamp(24px, 8vh, 76px);
+        left: 50%;
+        z-index: 10;
+        width: min(620px, 72vw);
+        transform: translateX(-50%);
+        pointer-events: none;
+      }
+      #landing-brand img {
+        display: block;
+        width: 100%;
+        height: auto;
+        filter: drop-shadow(0 14px 30px rgba(21, 4, 45, .32));
+      }
       @media (display-mode: standalone) { #connection-status { bottom: 24px; } }
+      @media (max-width: 640px) {
+        #landing-brand { top: 22px; width: min(460px, 82vw); }
+      }
     </style>
   </head>
   <body>
     <div id="scene-container"></div>
+    <div id="landing-brand" aria-hidden="true">
+      <img src="/holohangout-logo.png" alt="" />
+    </div>
     <div id="connection-status" data-state="offline" role="status" aria-live="polite">
       Connecting to HoloHangout…
     </div>
