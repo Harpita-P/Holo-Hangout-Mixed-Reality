@@ -42,9 +42,9 @@ const deepGrass = new MeshStandardMaterial({
 });
 const mintGrass = new MeshStandardMaterial({ color: '#77B96B', roughness: 0.88, metalness: 0 });
 const sageGrass = new MeshStandardMaterial({ color: '#5D9660', roughness: 0.9, metalness: 0 });
-const floatingStone = new MeshStandardMaterial({
-  color: '#6D5946',
-  roughness: 0.96,
+const floatingUnderside = new MeshStandardMaterial({
+  color: '#A84C78',
+  roughness: 0.94,
   metalness: 0,
   flatShading: true,
 });
@@ -190,7 +190,7 @@ export function createFloatingTerrainIsland(topColor = '#438F43'): Object3D {
   root.name = 'ChatIRL Floating Terrain Island';
   const underside = new Mesh(
     new CylinderGeometry(0.2, 0.045, 0.22, 7, 2, false),
-    floatingStone,
+    floatingUnderside,
   );
   underside.name = 'Tapered Stone Underside';
   underside.position.set(0.005, -0.145, 0.006);

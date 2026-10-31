@@ -151,6 +151,15 @@ const TABLE_MIN_Z = -0.495;
 const TABLE_MAX_Z = 0.495;
 const TERRAIN_RADIUS_X = 0.79;
 const TERRAIN_RADIUS_Z = 0.49;
+const LEADERBOARD_COLORS = {
+  background: '#FFC98B',
+  accent: '#E97818',
+  highlight: '#FFC107',
+  text: '#9A4200',
+  mutedText: '#AD5B17',
+  border: '#F2A65A',
+  gold: '#FFC107',
+} as const;
 const TERRAIN_OBSTACLES = [
   { x: -0.52, z: -0.34, radius: 0.18 },
   { x: 0.58, z: -0.33, radius: 0.15 },
@@ -1736,71 +1745,96 @@ export class ViewerAvatarSystem extends createSystem({
     const context = canvas?.getContext('2d');
     if (canvas == null || panel == null || context == null) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
-    context.shadowColor = 'rgba(91, 49, 18, 0.18)';
+    context.shadowColor = 'rgba(116, 53, 5, 0.24)';
     context.shadowBlur = 24;
-    context.fillStyle = 'rgba(255, 249, 242, 0.98)';
+    context.fillStyle = LEADERBOARD_COLORS.background;
     context.beginPath();
     context.roundRect(24, 24, 592, 852, 52);
     context.fill();
     context.shadowColor = 'transparent';
-    context.strokeStyle = '#EAD6C1';
+    context.strokeStyle = LEADERBOARD_COLORS.border;
     context.lineWidth = 7;
     context.stroke();
 
     // Lightweight trophy mark drawn directly into the existing canvas texture.
-    context.fillStyle = '#F4B56A';
+    context.fillStyle = LEADERBOARD_COLORS.highlight;
     context.beginPath();
     context.roundRect(281, 62, 78, 66, 18);
     context.fill();
-    context.strokeStyle = '#B85C18';
+    context.strokeStyle = LEADERBOARD_COLORS.accent;
     context.lineWidth = 8;
     context.stroke();
     context.beginPath();
     context.arc(279, 91, 25, Math.PI * 0.5, Math.PI * 1.5);
     context.arc(361, 91, 25, -Math.PI * 0.5, Math.PI * 0.5);
     context.stroke();
-    context.fillStyle = '#B85C18';
+    context.fillStyle = LEADERBOARD_COLORS.accent;
     context.fillRect(312, 126, 16, 25);
     context.beginPath();
     context.roundRect(287, 148, 66, 15, 7);
     context.fill();
 
     context.textAlign = 'center';
-    context.fillStyle = '#38271C';
+    context.fillStyle = LEADERBOARD_COLORS.text;
     context.font = '700 31px system-ui, sans-serif';
     context.fillText('TOP ACTIVE', 320, 212);
-    context.fillStyle = '#B85C18';
+    context.fillStyle = LEADERBOARD_COLORS.text;
     context.font = '900 54px system-ui, sans-serif';
     context.fillText('COMMUNITY', 320, 269);
-    context.fillStyle = '#38271C';
+    context.fillStyle = LEADERBOARD_COLORS.text;
     context.font = '700 30px system-ui, sans-serif';
     context.fillText('MEMBERS', 320, 310);
 
     if (this.communityEntries.length === 0) {
-      context.fillStyle = '#8B6D58';
+      context.fillStyle = LEADERBOARD_COLORS.mutedText;
       context.font = '600 31px system-ui, sans-serif';
       context.fillText('Waiting for the community…', 320, 560, 500);
     } else {
       this.communityEntries.slice(0, 3).forEach((entry, index) => {
         const y = 350 + index * 158;
-        context.fillStyle = index === 0 ? '#FCE4C4' : '#FFF1DF';
+        const rankStyle = [
+          { fill: '#FFD19A', border: LEADERBOARD_COLORS.gold, trophy: LEADERBOARD_COLORS.gold },
+          { fill: '#FFE8C7', border: LEADERBOARD_COLORS.accent, trophy: LEADERBOARD_COLORS.accent },
+          { fill: '#FFF0D9', border: '#F3A253', trophy: '#D96D12' },
+        ][index];
+        context.shadowColor = 'rgba(116, 53, 5, 0.16)';
+        context.shadowBlur = 10;
+        context.shadowOffsetY = 4;
+        context.fillStyle = rankStyle.fill;
         context.beginPath();
         context.roundRect(index === 0 ? 53 : 65, y, index === 0 ? 534 : 510, index === 0 ? 126 : 112, 30);
         context.fill();
-        if (index === 0) {
-          context.strokeStyle = '#B85C18';
-          context.lineWidth = 5;
-          context.stroke();
-        }
+        context.shadowColor = 'transparent';
+        context.shadowBlur = 0;
+        context.shadowOffsetY = 0;
+        context.strokeStyle = rankStyle.border;
+        context.lineWidth = index === 0 ? 5 : 3;
+        context.stroke();
+
+        const trophyX = 92;
+        const trophyY = y + (index === 0 ? 43 : 36);
+        context.fillStyle = rankStyle.trophy;
+        context.beginPath();
+        context.roundRect(trophyX, trophyY, 24, 20, 5);
+        context.fill();
+        context.strokeStyle = rankStyle.trophy;
+        context.lineWidth = 4;
+        context.beginPath();
+        context.arc(trophyX - 1, trophyY + 9, 8, Math.PI * 0.5, Math.PI * 1.5);
+        context.arc(trophyX + 25, trophyY + 9, 8, -Math.PI * 0.5, Math.PI * 0.5);
+        context.stroke();
+        context.fillRect(trophyX + 10, trophyY + 19, 5, 9);
+        context.fillRect(trophyX + 4, trophyY + 27, 17, 4);
+
         context.textAlign = 'left';
-        context.fillStyle = '#B85C18';
-        context.font = '800 39px system-ui, sans-serif';
-        context.fillText(`${index + 1}`, 88, y + (index === 0 ? 78 : 70));
-        context.fillStyle = '#38271C';
+        context.fillStyle = LEADERBOARD_COLORS.text;
+        context.font = '800 30px system-ui, sans-serif';
+        context.fillText(`${index + 1}`, 124, y + (index === 0 ? 76 : 68));
+        context.fillStyle = LEADERBOARD_COLORS.text;
         context.font = `${index === 0 ? 800 : 700} ${index === 0 ? 37 : 34}px system-ui, sans-serif`;
-        context.fillText(entry.displayName, 145, y + (index === 0 ? 76 : 68), 310);
+        context.fillText(entry.displayName, 161, y + (index === 0 ? 76 : 68), 294);
         context.textAlign = 'right';
-        context.fillStyle = '#B85C18';
+        context.fillStyle = LEADERBOARD_COLORS.text;
         context.font = '800 35px system-ui, sans-serif';
         context.fillText(String(entry.score), 545, y + (index === 0 ? 76 : 68));
       });

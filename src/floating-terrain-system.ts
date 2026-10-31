@@ -1,6 +1,8 @@
 import { createSystem, type Entity } from '@iwsdk/core';
 import { FloatingTerrain } from './floating-terrain-component.js';
 
+const VISIBLE_BOB_MULTIPLIER = 2.75;
+
 export class FloatingTerrainSystem extends createSystem({
   islands: { required: [FloatingTerrain] },
 }) {
@@ -15,7 +17,7 @@ export class FloatingTerrainSystem extends createSystem({
         baseHeight = object.position.y;
         this.baseHeights.set(entity, baseHeight);
       }
-      const amplitude = entity.getValue(FloatingTerrain, 'amplitude') ?? 0.01;
+      const amplitude = (entity.getValue(FloatingTerrain, 'amplitude') ?? 0.01) * VISIBLE_BOB_MULTIPLIER;
       const speed = entity.getValue(FloatingTerrain, 'speed') ?? 0.8;
       const phase = entity.getValue(FloatingTerrain, 'phase') ?? 0;
       object.position.y = baseHeight + Math.sin(time * speed + phase) * amplitude;

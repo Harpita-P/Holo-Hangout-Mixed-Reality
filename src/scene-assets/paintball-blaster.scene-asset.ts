@@ -12,14 +12,14 @@ import {
 const shell = new MeshStandardMaterial({ color: '#6236D8', roughness: 0.32, metalness: 0.18 });
 const dark = new MeshStandardMaterial({ color: '#17243A', roughness: 0.48, metalness: 0.32 });
 const accent = new MeshStandardMaterial({
-  color: '#FF4FA3',
-  emissive: '#A00052',
+  color: '#A78BFA',
+  emissive: '#A78BFA',
   emissiveIntensity: 0.65,
   roughness: 0.28,
 });
 const glow = new MeshStandardMaterial({
-  color: '#FFB4DC',
-  emissive: '#FF2F98',
+  color: '#B794FF',
+  emissive: '#B794FF',
   emissiveIntensity: 2.4,
   transparent: true,
   opacity: 0.95,
