@@ -418,7 +418,6 @@ function controlPage(): string {
 <body><main class="shell">
 <nav class="topbar"><div class="brand-lockup"><h1 class="visually-hidden">HoloHangout</h1><img class="brand-logo" src="/holohangout-logo.png" alt="HoloHangout"><p class="brand-tagline">Bring your Twitch community into mixed reality.</p></div></nav>
 <h2 class="onboarding-heading">Launch a Shared Mixed Reality Experience for <span>Chat</span></h2>
-<section class="landing-cta" aria-label="Get started with HoloHangout"><p>Bring your Twitch community into your world. Play, interact, and create together in mixed reality.</p><a class="button github-button" href="https://github.com/Harpita-P/Holo-Hangout-Mixed-Reality" target="_blank" rel="noopener noreferrer">Get Started on GitHub</a><small>Free, open-source setup and instructions for connecting Twitch, Meta Quest, and OBS.</small></section>
 <nav class="stepper" aria-label="Getting started">
 <a id="step-twitch" class="step" href="#connect-twitch"><span class="step-number" aria-hidden="true"></span><span class="step-content"><span class="step-label">STEP 1</span><strong>Connect Twitch</strong><small id="step-twitch-status">Checking…</small></span></a>
 <a id="step-world" class="step" href="#enter-world"><span class="step-number" aria-hidden="true"></span><span class="step-content"><span class="step-label">STEP 2</span><strong>Enter Your World</strong><small id="step-world-status">Checking…</small></span></a>

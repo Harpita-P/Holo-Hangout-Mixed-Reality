@@ -16,8 +16,9 @@
       html, body, #scene-container { width: 100%; height: 100%; margin: 0; overflow: hidden; }
       #connection-status {
         position: fixed;
+        top: 16px;
         left: 16px;
-        bottom: 16px;
+        bottom: auto;
         z-index: 20;
         max-width: min(460px, calc(100vw - 32px));
         box-sizing: border-box;
@@ -34,29 +35,79 @@
       #connection-status[data-state="waiting"] { border-color: #ffc76c; }
       #landing-brand {
         position: fixed;
-        top: clamp(24px, 8vh, 76px);
-        left: 50%;
+        inset: 0;
         z-index: 10;
-        width: min(620px, 72vw);
-        transform: translateX(-50%);
+        width: 100%;
         pointer-events: none;
+        text-align: center;
       }
       #landing-brand img {
+        position: absolute;
+        top: max(18px, env(safe-area-inset-top));
+        left: 50%;
         display: block;
-        width: 100%;
+        width: min(420px, 62vw);
+        max-height: 24vh;
         height: auto;
+        object-fit: contain;
+        transform: translateX(-50%);
         filter: drop-shadow(0 14px 30px rgba(21, 4, 45, .32));
       }
-      @media (display-mode: standalone) { #connection-status { bottom: 24px; } }
+      #landing-intro {
+        position: absolute;
+        bottom: max(14px, env(safe-area-inset-bottom));
+        left: 50%;
+        width: min(500px, calc(100vw - 32px));
+        max-width: 500px;
+        box-sizing: border-box;
+        margin: 0;
+        border: 1px solid rgba(34,29,39,.08);
+        border-radius: 18px;
+        padding: 18px 21px 19px;
+        color: #211d27;
+        background: rgba(255,255,255,.94);
+        box-shadow: 0 12px 32px rgba(30,22,40,.14);
+        backdrop-filter: blur(10px);
+        transform: translateX(-50%);
+      }
+      #landing-intro h2 { margin: 0 0 8px; font: 800 clamp(19px, 2.4vw, 24px)/1.2 system-ui, sans-serif; letter-spacing: -.025em; }
+      #landing-intro p { margin: 0 0 16px; color: #554e5c; font: 500 clamp(14px, 1.7vw, 16px)/1.5 system-ui, sans-serif; }
+      #landing-intro code { border-radius: 5px; padding: 2px 5px; color: #211d27; background: #f0edf2; font: 700 .92em ui-monospace, SFMono-Regular, Menlo, monospace; }
+      #github-button {
+        display: inline-flex;
+        min-height: 50px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #000;
+        border-radius: 12px;
+        padding: 11px 21px;
+        color: #fff;
+        background: #000;
+        box-shadow: 0 8px 20px rgba(0,0,0,.18);
+        font: 800 16px/1.2 system-ui, sans-serif;
+        text-decoration: none;
+        pointer-events: auto;
+        transition: transform .16s ease, box-shadow .16s ease;
+      }
+      #github-button:hover, #github-button:focus-visible { transform: translateY(-2px); box-shadow: 0 11px 24px rgba(0,0,0,.24); }
+      @media (display-mode: standalone) { #connection-status { top: 24px; } }
       @media (max-width: 640px) {
-        #landing-brand { top: 22px; width: min(460px, 82vw); }
+        #landing-brand img { top: max(12px, env(safe-area-inset-top)); width: min(320px, 66vw); max-height: 20vh; }
+        #landing-intro { bottom: max(10px, env(safe-area-inset-bottom)); padding: 15px 16px 16px; }
+        #landing-intro p { margin-bottom: 13px; }
+        #github-button { min-height: 46px; padding: 10px 18px; font-size: 15px; }
       }
     </style>
   </head>
   <body>
     <div id="scene-container"></div>
-    <div id="landing-brand" aria-hidden="true">
-      <img src="/holohangout-logo.png" alt="" />
+    <div id="landing-brand">
+      <img src="/holohangout-logo.png" alt="HoloHangout" />
+      <section id="landing-intro" aria-label="Get started with HoloHangout">
+        <h2>Bring your Twitch community into your world.</h2>
+        <p>Create shared live experiences in mixed reality. Stream on Twitch, and let viewers type <code>!join</code> to enter your world, play, interact, and create together in real time.</p>
+        <a id="github-button" href="https://github.com/Harpita-P/Holo-Hangout-Mixed-Reality" target="_blank" rel="noopener noreferrer">Get Started on GitHub</a>
+      </section>
     </div>
     <div id="connection-status" data-state="offline" role="status" aria-live="polite">
       Connecting to HoloHangout…
