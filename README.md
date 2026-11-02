@@ -64,6 +64,14 @@ npm run start:holohangout
 
 Open the dashboard at **http://localhost:8787**.
 
+
+<p align="center">
+  <img src="public/DashboardHH.png"
+       alt="HoloHangout Streamer Dashboard"
+       width="650">
+</p>
+
+
 ### 3. Start Your Hangout
 
 1. **Connect Twitch** — Authorize your Twitch account from the dashboard.
