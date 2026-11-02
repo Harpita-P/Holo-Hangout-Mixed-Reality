@@ -1,6 +1,11 @@
 # Holo Hangout
-
 ### A New Dimension of Shared Live Experiences
+
+<p align="center">
+  <img src="public/holohangout-thumbnail-readme.png"
+       alt="HoloHangout Mixed Reality Preview"
+       width="500">
+</p>
 
 **HoloHangout** brings Twitch viewers into a streamer's mixed reality world as animated characters, allowing creators and their communities to interact, play, and create together in real time.
 
