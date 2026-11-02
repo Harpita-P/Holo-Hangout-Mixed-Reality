@@ -7,7 +7,7 @@
        width="500">
 </p>
 
-**HoloHangout** brings Twitch viewers into a streamer's mixed reality world as animated characters, allowing creators and their communities to interact, play, and create together in real time.
+**HoloHangout** brings Twitch viewers into a VR streamer's mixed reality world as animated characters, allowing creators and their communities to interact, play, and create together in real time.
 
 [Get Started](#quick-start) · [Download Source](https://github.com/Harpita-P/Holo-Hangout-Mixed-Reality/archive/refs/heads/main.zip) · [Quest Capture APK](release/HoloHangout-Capture.apk)
 
