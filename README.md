@@ -26,7 +26,7 @@
 - Play alongside the streamer in interactive challenges.
 - Use `!build <idea>` to suggest 3D creations that the streamer can approve and physically interact with.
 
-## Quick Start - 4 Step Setup
+## Quick Start - 3 Step Setup
 
 ### Requirements
 - Windows or macOS
