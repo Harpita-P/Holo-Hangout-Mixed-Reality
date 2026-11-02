@@ -1,5 +1,5 @@
-# Holo Hangout
-### A New Dimension of Shared Live Experiences
+# Holo Hangout 
+### A New Dimension of Shared Live Experiences 
 
 <p align="center">
   <img src="public/holohangout-thumbnail-readme.png"
@@ -8,6 +8,8 @@
 </p>
 
 **HoloHangout** brings Twitch viewers into a VR streamer's mixed reality world as 3D animated characters, allowing creators and their communities to interact, play, and create together in real time.
+
+Built for the Codex x TwitchCon Hackathon 2026
 
 [Get Started](#quick-start) · [Download Source](https://github.com/Harpita-P/Holo-Hangout-Mixed-Reality/archive/refs/heads/main.zip) · [Quest Capture APK](release/HoloHangout-Capture.apk)
 
